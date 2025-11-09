@@ -1,0 +1,12 @@
+const { JSDOM } = require('jsdom');
+const fs = require('fs');
+const html = fs.readFileSync('roadmap.html', 'utf8');
+const js = fs.readFileSync('roadmap.js', 'utf8');
+const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://example.org' });
+dom.window.eval(js);
+const select = dom.window.document.querySelector('.custom-select[data-select="feature-status"]');
+console.log('select exists?', !!select);
+console.log('bound?', select?.dataset.bound);
+const trigger = select.querySelector('.custom-select__trigger');
+trigger.dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+console.log('after click open?', select.classList.contains('is-open'));

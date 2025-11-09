@@ -1,0 +1,785 @@
+(() => {
+  const STORAGE_KEYS = {
+    votes: "inform_roadmap_votes",
+    ideas: "inform_roadmap_ideas",
+    features: "inform_roadmap_features",
+    adminMode: "inform_roadmap_admin_mode",
+  };
+
+  const ADMIN_PASSWORD = "admin";
+
+  const STATUS_META = {
+    in_progress: { label: "В работе", className: "status-chip status-in-progress", order: 0 },
+    planned: { label: "Запланировано", className: "status-chip status-pending", order: 1 },
+    research: { label: "Исследуем", className: "status-chip status-research", order: 2 },
+    shipped: { label: "Выпущено", className: "status-chip status-done", order: 3 },
+  };
+
+  const DEFAULT_FEATURES = [
+    {
+      id: "automation-checklists",
+      title: "Автоматизация чек-листов",
+      description: "Чек-листы под задачами с автоматическим обновлением статуса и дедлайна.",
+      status: "in_progress",
+      eta: "ноябрь 2025",
+      category: "Задачи",
+      tags: ["Workflow", "Automation"],
+      baseVotes: 32,
+    },
+    {
+      id: "content-calendar-sync",
+      title: "Синхронизация контент-плана с календарями",
+      description: "Экспорт релизов в Google Calendar и подписка всей команды на изменения.",
+      status: "planned",
+      eta: "декабрь 2025",
+      category: "Контент",
+      tags: ["Calendar", "Sync"],
+      baseVotes: 24,
+    },
+    {
+      id: "role-permissions",
+      title: "Роли и права доступа",
+      description: "Отдельные роли для редактора, дизайнера и администратора с разными правами.",
+      status: "planned",
+      eta: "январь 2026",
+      category: "Команда",
+      tags: ["Security"],
+      baseVotes: 41,
+    },
+    {
+      id: "notifications-center",
+      title: "Центр уведомлений",
+      description: "Уведомления о дедлайнах, комментариях и упоминаниях прямо в приложении.",
+      status: "in_progress",
+      eta: "декабрь 2025",
+      category: "Коммуникации",
+      tags: ["Realtime"],
+      baseVotes: 35,
+    },
+    {
+      id: "ai-post-helper",
+      title: "AI-помощник для постов",
+      description: "Генерация черновиков постов и заголовков на основе брифа и истории публикаций.",
+      status: "research",
+      eta: "Q1 2026",
+      category: "Контент",
+      tags: ["AI", "Эксперимент"],
+      baseVotes: 18,
+    },
+    {
+      id: "analytics-v2",
+      title: "Расширенная аналитика контента",
+      description: "Сводные отчёты по соцсетям с рекомендациями и экспортом в .xlsx.",
+      status: "planned",
+      eta: "февраль 2026",
+      category: "Аналитика",
+      tags: ["Data"],
+      baseVotes: 29,
+    },
+  ];
+
+  const votesState = loadVotes();
+  const ideasState = loadIdeas();
+  let featureState = loadFeatures();
+  let isAdmin = loadAdminMode();
+  let editingFeatureId = null;
+
+  const roadmapList = document.getElementById("roadmapList");
+  const adminToggleBtn = document.getElementById("adminToggleBtn");
+  const adminPanel = document.getElementById("adminPanel");
+  const adminLogoutBtn = document.getElementById("adminLogoutBtn");
+  const featureForm = document.getElementById("featureForm");
+  const adminFeatureList = document.getElementById("adminFeatureList");
+  const featureIdInput = document.getElementById("featureId");
+  const featureSubmitBtn = document.getElementById("featureSubmitBtn");
+  const featureCancelEditBtn = document.getElementById("featureCancelEditBtn");
+  const featureStatusSelect = document.querySelector(".custom-select[data-select='feature-status']");
+  let customSelectGlobalHandlersBound = false;
+
+  init();
+
+  function init() {
+    renderHeroDate();
+    renderStats();
+    renderFeatures();
+    bindVotes();
+    bindAdminControls();
+    initFeatureStatusSelect();
+  }
+
+  function renderHeroDate() {
+    const badge = document.getElementById("heroBadgeDate");
+    if (!badge) return;
+    badge.textContent = new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "long",
+    }).format(new Date());
+  }
+
+  function renderStats() {
+    const inProgress = featureState.filter((item) => item.status === "in_progress").length;
+    const planned = featureState.filter((item) => item.status === "planned").length;
+    const research = featureState.filter((item) => item.status === "research").length;
+    document.getElementById("statInProgress").textContent = inProgress;
+    document.getElementById("statPlanned").textContent = planned;
+    const researchNode = document.getElementById("statResearch");
+    if (researchNode) {
+      researchNode.textContent = research;
+    }
+  }
+
+  function renderFeatures() {
+    if (!roadmapList) return;
+    const items = [...featureState].sort((a, b) => {
+      const orderA = STATUS_META[a.status]?.order ?? 99;
+      const orderB = STATUS_META[b.status]?.order ?? 99;
+      if (orderA !== orderB) return orderA - orderB;
+      return getVotes(b) - getVotes(a);
+    });
+
+    roadmapList.innerHTML = items
+      .map((feature) => {
+        const status = STATUS_META[feature.status];
+        const voted = Boolean(votesState.choices[feature.id]);
+        return `
+        <article class="feature-card" data-id="${feature.id}">
+          <div class="feature-card__head">
+            <span class="${status?.className || "status-chip"}">${status?.label || "Статус"}</span>
+            <span class="feature-card__eta">${escapeHtml(feature.eta || "TBA")}</span>
+          </div>
+          <h3>${escapeHtml(feature.title)}</h3>
+          <p>${escapeHtml(feature.description)}</p>
+          <div class="feature-card__meta">
+            <span class="feature-card__category">${escapeHtml(feature.category || "Продукт")}</span>
+            <div class="feature-card__tags">
+              ${(feature.tags || [])
+                .map((tag) => `<span class="feature-tag">${escapeHtml(tag)}</span>`)
+                .join("")}
+            </div>
+          </div>
+          <div class="feature-card__footer">
+            <button
+              class="vote-btn ${voted ? "vote-btn--active" : ""}"
+              data-action="vote"
+              data-id="${feature.id}"
+            >
+              ${voted ? "Вы голосовали" : "Поддержать"}
+            </button>
+            <span class="vote-count">
+              ${getVotes(feature)} голос${pluralize(getVotes(feature))}
+            </span>
+          </div>
+        </article>
+      `;
+      })
+      .join("");
+
+    if (isAdmin) {
+      renderAdminFeatureList();
+    }
+  }
+
+  function bindVotes() {
+    if (!roadmapList) return;
+    roadmapList.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-action='vote']");
+      if (!btn) return;
+      const featureId = btn.dataset.id;
+      toggleVote(featureId);
+      renderStats();
+      renderFeatures();
+    });
+  }
+
+  function toggleVote(featureId) {
+    if (!featureId) return;
+    const alreadyVoted = Boolean(votesState.choices[featureId]);
+    votesState.counts[featureId] = votesState.counts[featureId] || 0;
+
+    if (alreadyVoted) {
+      votesState.counts[featureId] = Math.max(0, votesState.counts[featureId] - 1);
+      delete votesState.choices[featureId];
+    } else {
+      votesState.counts[featureId] += 1;
+      votesState.choices[featureId] = true;
+    }
+
+    persistVotes();
+  }
+
+  function bindAdminControls() {
+    if (adminToggleBtn) {
+      adminToggleBtn.addEventListener("click", () => {
+        if (isAdmin) {
+          isAdmin = false;
+          persistAdminMode();
+          resetFeatureEditor();
+          updateAdminUI();
+          return;
+        }
+        const password = prompt("Введите пароль администратора");
+        if (password && password.trim() === ADMIN_PASSWORD) {
+          isAdmin = true;
+          persistAdminMode();
+          updateAdminUI();
+        } else {
+          alert("Неверный пароль");
+        }
+      });
+    }
+
+    if (adminLogoutBtn) {
+      adminLogoutBtn.addEventListener("click", () => {
+        isAdmin = false;
+        persistAdminMode();
+        resetFeatureEditor();
+        updateAdminUI();
+      });
+    }
+
+
+
+    if (featureForm) {
+
+      featureForm.addEventListener("submit", (event) => {
+
+        event.preventDefault();
+
+        const formData = new FormData(featureForm);
+
+        const title = formData.get("title")?.trim();
+
+        const description = formData.get("description")?.trim();
+
+        if (!title || !description) return;
+
+        const payload = {
+
+          title,
+
+          description,
+
+          status: formData.get("status") || "planned",
+
+          eta: formData.get("eta")?.trim() || "TBA",
+
+          category: formData.get("category")?.trim() || "Категория",
+
+          tags: (formData.get("tags") || "")
+
+            .split(",")
+
+            .map((tag) => tag.trim())
+
+            .filter(Boolean),
+
+          baseVotes: Number(formData.get("votes")) || 0,
+
+        };
+
+        const existingId = formData.get("featureId")?.trim();
+
+        if (existingId) {
+
+          featureState = featureState.map((feature) =>
+
+            feature.id === existingId ? { ...feature, ...payload } : feature
+
+          );
+
+        } else {
+
+          const newFeature = {
+
+            id: `feature-${Date.now()}`,
+
+            ...payload,
+
+          };
+
+          featureState = [newFeature, ...featureState];
+
+        }
+
+        persistFeatures();
+
+        resetFeatureEditor();
+
+        renderStats();
+
+        renderFeatures();
+
+      });
+
+    }
+
+
+
+    if (featureCancelEditBtn) {
+
+      featureCancelEditBtn.addEventListener("click", () => {
+
+        resetFeatureEditor();
+
+      });
+
+    }
+
+
+
+    if (adminFeatureList) {
+      adminFeatureList.addEventListener("change", (event) => {
+        const select = event.target.closest("[data-role='status']");
+        if (!select) return;
+        const row = select.closest(".admin-feature-row");
+        if (!row) return;
+        updateFeatureStatus(row.dataset.id, select.value);
+      });
+
+
+
+      adminFeatureList.addEventListener("click", (event) => {
+
+        const editBtn = event.target.closest("[data-role='edit']");
+
+        if (editBtn) {
+
+          const row = editBtn.closest(".admin-feature-row");
+
+          if (row) {
+
+            startFeatureEdit(row.dataset.id);
+
+          }
+
+          return;
+
+        }
+
+
+
+        const removeBtn = event.target.closest("[data-role='remove']");
+
+        if (!removeBtn) return;
+
+        const row = removeBtn.closest(".admin-feature-row");
+
+        if (!row) return;
+
+        if (confirm("Удалить эту фичу?")) {
+
+          removeFeature(row.dataset.id);
+
+        }
+
+      });
+
+
+
+
+
+
+
+
+    }
+
+    updateAdminUI();
+  }
+
+  function updateAdminUI() {
+    if (adminToggleBtn) {
+      adminToggleBtn.textContent = isAdmin ? "Выйти из админ-панели" : "Войти как админ";
+    }
+    if (adminPanel) {
+      adminPanel.hidden = !isAdmin;
+    }
+    renderAdminFeatureList();
+  }
+
+  function renderAdminFeatureList() {
+
+    if (!isAdmin || !adminFeatureList) {
+
+      if (adminFeatureList) adminFeatureList.innerHTML = "";
+
+      return;
+
+    }
+
+    adminFeatureList.innerHTML = featureState
+
+      .map(
+
+        (feature) => `
+
+        <div class="admin-feature-row" data-id="${feature.id}">
+
+          <div class="admin-feature-row__info">
+
+            <h4>${escapeHtml(feature.title)}</h4>
+
+            <p>${escapeHtml(feature.category || "Категория")} • ${escapeHtml(feature.eta || "TBA")}</p>
+
+          </div>
+
+          <div class="admin-feature-row__controls">
+
+            <select data-role="status">
+
+              ${Object.entries(STATUS_META)
+
+                .map(
+
+                  ([value, meta]) =>
+
+                    `<option value="${value}" ${feature.status === value ? "selected" : ""}>${meta.label}</option>`
+
+                )
+
+                .join("")}
+
+            </select>
+
+            <button class="ghost-btn" type="button" data-role="edit">Редактировать</button>
+
+            <button class="ghost-btn" type="button" data-role="remove">Удалить</button>
+
+          </div>
+
+        </div>
+
+      `
+
+      )
+
+      .join("");
+
+  }
+
+
+
+  function startFeatureEdit(featureId) {
+
+    if (!featureForm || !featureId) return;
+
+    const feature = featureState.find((item) => item.id === featureId);
+
+    if (!feature) return;
+
+
+
+    editingFeatureId = feature.id;
+
+    if (featureIdInput) {
+
+      featureIdInput.value = feature.id;
+
+    }
+
+
+
+    const controls = featureForm.elements;
+
+    const setValue = (name, value = "") => {
+
+      const control = controls.namedItem(name);
+
+      if (control && "value" in control) {
+
+        control.value = value;
+
+      }
+
+    };
+
+
+
+    setValue("title", feature.title || "");
+
+    setValue("description", feature.description || "");
+
+    setValue("status", feature.status || "planned");
+    syncFeatureStatusSelect(feature.status || "planned");
+
+    setValue("eta", feature.eta || "TBA");
+
+    setValue("category", feature.category || "");
+
+    setValue(
+
+      "tags",
+
+      Array.isArray(feature.tags) ? feature.tags.join(", ") : feature.tags || ""
+
+    );
+
+    setValue("votes", String(typeof feature.baseVotes === "number" ? feature.baseVotes : 0));
+
+
+
+    if (featureSubmitBtn) {
+
+      featureSubmitBtn.textContent = "Сохранить изменения";
+
+    }
+
+    if (featureCancelEditBtn) {
+
+      featureCancelEditBtn.hidden = false;
+
+    }
+
+    if (typeof featureForm.scrollIntoView === "function") {
+
+      featureForm.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    }
+
+  }
+
+
+
+  function resetFeatureEditor() {
+
+    if (!featureForm) return;
+
+    featureForm.reset();
+    syncFeatureStatusSelect("planned");
+
+    editingFeatureId = null;
+
+    if (featureIdInput) {
+
+      featureIdInput.value = "";
+
+    }
+
+    if (featureSubmitBtn) {
+
+      featureSubmitBtn.textContent = "Добавить фичу";
+
+    }
+
+    if (featureCancelEditBtn) {
+
+      featureCancelEditBtn.hidden = true;
+
+    }
+
+  }
+
+  function initFeatureStatusSelect() {
+    if (!featureStatusSelect) return;
+    initCustomSelect(featureStatusSelect, (value) => {
+      const hiddenInput = featureStatusSelect.querySelector('input[name="status"]');
+      if (hiddenInput) hiddenInput.value = value;
+    });
+    const currentValue =
+      featureStatusSelect.dataset.value ||
+      featureForm?.elements?.namedItem("status")?.value ||
+      "planned";
+    syncFeatureStatusSelect(currentValue);
+  }
+
+  function syncFeatureStatusSelect(value) {
+    if (!featureStatusSelect) return;
+    const optionNode = featureStatusSelect.querySelector(
+      `.custom-select__option[data-value="${value}"]`
+    );
+    const label = optionNode ? optionNode.textContent.trim() : value;
+    setCustomSelectValue(featureStatusSelect, value, label);
+  }
+
+  function initCustomSelect(selectEl, onChange) {
+    if (!selectEl || selectEl.dataset.bound === "true") return;
+    selectEl.dataset.bound = "true";
+    const trigger = selectEl.querySelector(".custom-select__trigger");
+    if (trigger) {
+      trigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const alreadyOpen = selectEl.classList.contains("is-open");
+        closeAllCustomSelects();
+        if (!alreadyOpen) {
+          openCustomSelect(selectEl);
+        }
+      });
+    }
+
+    selectEl.querySelectorAll(".custom-select__option").forEach((optionBtn) => {
+      optionBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = optionBtn.dataset.value;
+        const label = optionBtn.textContent.trim();
+        setCustomSelectValue(selectEl, value, label);
+        if (typeof onChange === "function") {
+          onChange(value, label);
+        }
+        closeAllCustomSelects();
+      });
+    });
+
+    ensureCustomSelectGlobalHandlers();
+  }
+
+  function ensureCustomSelectGlobalHandlers() {
+    if (customSelectGlobalHandlersBound) return;
+    customSelectGlobalHandlersBound = true;
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".custom-select")) {
+        closeAllCustomSelects();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeAllCustomSelects();
+      }
+    });
+  }
+
+  function openCustomSelect(selectEl) {
+    selectEl.classList.add("is-open");
+    const trigger = selectEl.querySelector(".custom-select__trigger");
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+  }
+
+  function closeAllCustomSelects() {
+    document.querySelectorAll(".custom-select.is-open").forEach((selectEl) => {
+      selectEl.classList.remove("is-open");
+      const trigger = selectEl.querySelector(".custom-select__trigger");
+      if (trigger) trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function setCustomSelectValue(selectEl, value, label) {
+    if (!selectEl) return;
+    selectEl.dataset.value = value;
+    const valueNode = selectEl.querySelector(".custom-select__value");
+    if (valueNode) valueNode.textContent = label;
+    selectEl.querySelectorAll(".custom-select__option").forEach((optionNode) => {
+      optionNode.classList.toggle("is-selected", optionNode.dataset.value === value);
+    });
+    const hiddenInput = selectEl.querySelector('input[type="hidden"]');
+    if (hiddenInput) hiddenInput.value = value;
+  }
+
+
+
+  function updateFeatureStatus(featureId, status) {
+    featureState = featureState.map((feature) =>
+      feature.id === featureId ? { ...feature, status } : feature
+    );
+    persistFeatures();
+    renderStats();
+    renderFeatures();
+  }
+
+  function removeFeature(featureId) {
+    featureState = featureState.filter((feature) => feature.id !== featureId);
+    if (editingFeatureId === featureId) {
+      resetFeatureEditor();
+    }
+    delete votesState.counts[featureId];
+    delete votesState.choices[featureId];
+    persistVotes();
+    persistFeatures();
+    renderStats();
+    renderFeatures();
+  }
+
+  function getVotes(feature) {
+    return (feature.baseVotes || 0) + (votesState.counts[feature.id] || 0);
+  }
+
+  function loadVotes() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.votes);
+      if (!raw) return { counts: {}, choices: {} };
+      const parsed = JSON.parse(raw);
+      return {
+        counts: parsed.counts || {},
+        choices: parsed.choices || {},
+      };
+    } catch {
+      return { counts: {}, choices: {} };
+    }
+  }
+
+  function persistVotes() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.votes, JSON.stringify(votesState));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadIdeas() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.ideas);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function loadFeatures() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.features);
+      if (!raw) {
+        localStorage.setItem(STORAGE_KEYS.features, JSON.stringify(DEFAULT_FEATURES));
+        return [...DEFAULT_FEATURES];
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed;
+      }
+      return [...DEFAULT_FEATURES];
+    } catch {
+      return [...DEFAULT_FEATURES];
+    }
+  }
+
+  function persistFeatures() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.features, JSON.stringify(featureState));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadAdminMode() {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.adminMode) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  function persistAdminMode() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.adminMode, String(isAdmin));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function escapeHtml(value = "") {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function pluralize(count) {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return "";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "а";
+    return "ов";
+  }
+})();

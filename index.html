@@ -1,0 +1,68 @@
+﻿
+
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Manager • Информ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">ФКП</div>
+          <div class="brand__text">
+            <p class="brand__title">Информ β</p>
+            <p class="brand__subtitle">Media Task Manager</p>
+          </div>
+        </div>
+        <nav class="sidebar__nav">
+          <button class="nav-btn nav-btn--active" data-tab="tasks">
+            <span>Задачи</span>
+          </button>
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+            <span>Контент-план</span>
+            <small>скоро</small>
+          </button>
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+            <span>Команда</span>
+            <small>скоро</small>
+          </button>
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+            <span>Уведомления</span>
+            <small>скоро</small>
+          </button>
+          <a class="nav-btn nav-btn--placeholder nav-btn--link" href="roadmap.html">
+            <span>Дорожная карта</span>
+          </a>
+        </nav>
+        <div class="sidebar__footer">
+          <p class="sidebar__version">MVP 1.5</p>
+          <button class="sidebar__logout" type="button">Выйти</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace__header">
+          <div>
+            <h1 class="workspace__title">Задачи</h1>
+          </div>
+          <div class="user-chip" id="userChip" aria-live="polite"></div>
+        </header>
+
+        <section id="tasksRoot" class="tasks-root"></section>
+      </main>
+    </div>
+
+    <div id="modalRoot" aria-live="assertive"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>

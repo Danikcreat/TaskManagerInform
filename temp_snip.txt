@@ -1,0 +1,36 @@
+
+
+  function resetFeatureEditor() {
+
+    if (!featureForm) return;
+
+    featureForm.reset();
+    syncFeatureStatusSelect("planned");
+
+    editingFeatureId = null;
+
+    if (featureIdInput) {
+
+      featureIdInput.value = "";
+
+    }
+
+    if (featureSubmitBtn) {
+
+      featureSubmitBtn.textContent = "Добавить фичу";
+
+    }
+
+    if (featureCancelEditBtn) {
+
+      featureCancelEditBtn.hidden = true;
+
+    }
+
+  }
+
+
+
+  function updateFeatureStatus(featureId, status) {
+    featureState = featureState.map((feature) =>
+      feature.id === featureId ? { ...feature, status } : feature
