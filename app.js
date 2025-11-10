@@ -72,6 +72,7 @@
   let tasksRoot = null;
   let userChip = null;
   let modalRoot = null;
+  let toastRoot = null;
   let customSelectGlobalHandlersBound = false;
 
   let allTasks = [];
@@ -518,6 +519,7 @@
         try {
           await handleTaskUpdate(task.id, { status: newStatus });
           rerender();
+          showToast("Статус задачи обновлен", { variant: "success" });
         } catch (error) {
           showErrorMessage(getErrorMessage(error, "Не удалось обновить статус задачи"));
         }
@@ -545,7 +547,7 @@
       copyLinkBtn.addEventListener("click", async () => {
         try {
           await copyTaskLink(task.id);
-          window.alert("Ссылка на задачу скопирована");
+          showToast("Ссылка на задачу скопирована", { variant: "success" });
         } catch (error) {
           showErrorMessage(
             getErrorMessage(error, "Не удалось скопировать ссылку на задачу")
@@ -1071,6 +1073,53 @@
 
   function showErrorMessage(message) {
     window.alert(message);
+  }
+
+  function ensureToastRoot() {
+    if (toastRoot) return toastRoot;
+    toastRoot = document.getElementById("toastRoot");
+    if (!toastRoot) {
+      toastRoot = document.createElement("div");
+      toastRoot.id = "toastRoot";
+      toastRoot.className = "toast-container";
+      toastRoot.setAttribute("role", "status");
+      toastRoot.setAttribute("aria-live", "polite");
+      toastRoot.setAttribute("aria-atomic", "true");
+      document.body.appendChild(toastRoot);
+    }
+    return toastRoot;
+  }
+
+  function showToast(message, options = {}) {
+    if (!message) return;
+    const container = ensureToastRoot();
+    const toast = document.createElement("div");
+    const variantClass = options.variant ? ` toast--${options.variant}` : "";
+    toast.className = `toast${variantClass}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.add("is-visible");
+    });
+
+    const duration = typeof options.duration === "number" ? options.duration : 2800;
+    const removeToast = () => {
+      toast.classList.remove("is-visible");
+      toast.addEventListener(
+        "transitionend",
+        () => {
+          toast.remove();
+        },
+        { once: true }
+      );
+    };
+
+    const timeoutId = setTimeout(removeToast, Math.max(1000, duration));
+    toast.addEventListener("click", () => {
+      clearTimeout(timeoutId);
+      removeToast();
+    });
   }
 
   function formatDeadline(isoString) {
