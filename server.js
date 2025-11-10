@@ -1,269 +1,265 @@
-const path = require("path");
-const fs = require("fs");
+require("dotenv").config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const Database = require("better-sqlite3");
+const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
 
 const PORT = process.env.PORT || 4000;
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data", "app.db");
+const DATABASE_URL = process.env.DATABASE_URL;
 
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+if (!DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL environment variable is required. Provide your Supabase connection string."
+  );
+}
 
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-
-db.prepare(
-  `
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `
-).run();
-
-const insertTaskStmt = db.prepare(
-  "INSERT INTO tasks (id, payload, created_at, updated_at) VALUES (@id, @payload, @created_at, @updated_at)"
-);
-const updateTaskStmt = db.prepare(
-  "UPDATE tasks SET payload = @payload, updated_at = @updated_at WHERE id = @id"
-);
-const deleteTaskStmt = db.prepare("DELETE FROM tasks WHERE id = ?");
-const findTaskStmt = db.prepare("SELECT payload FROM tasks WHERE id = ?");
-const listTasksStmt = db.prepare("SELECT payload FROM tasks ORDER BY datetime(updated_at) DESC");
-const countTasksStmt = db.prepare("SELECT COUNT(1) as count FROM tasks");
-
-db.prepare(
-  `
-    CREATE TABLE IF NOT EXISTS features (
-      id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `
-).run();
-
-const insertFeatureStmt = db.prepare(
-  "INSERT INTO features (id, payload, created_at, updated_at) VALUES (@id, @payload, @created_at, @updated_at)"
-);
-const updateFeatureStmt = db.prepare(
-  "UPDATE features SET payload = @payload, updated_at = @updated_at WHERE id = @id"
-);
-const deleteFeatureStmt = db.prepare("DELETE FROM features WHERE id = ?");
-const findFeatureStmt = db.prepare("SELECT payload FROM features WHERE id = ?");
-const listFeaturesStmt = db.prepare(
-  "SELECT payload FROM features ORDER BY datetime(updated_at) DESC"
-);
-const countFeaturesStmt = db.prepare("SELECT COUNT(1) as count FROM features");
-
-ensureSeedData();
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: getSSLConfig(DATABASE_URL),
+});
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+const asyncHandler = (handler) => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
 });
 
-app.get("/api/tasks", (_req, res) => {
-  const tasks = listTasksStmt
-    .all()
-    .map(rowToTask)
-    .filter(Boolean);
-  res.json(tasks);
-});
+app.get(
+  "/api/tasks",
+  asyncHandler(async (_req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM tasks ORDER BY updated_at DESC");
+    const tasks = rows.map(rowToTask).filter(Boolean);
+    res.json(tasks);
+  })
+);
 
-app.get("/api/tasks/:id", (req, res) => {
-  const task = rowToTask(findTaskStmt.get(req.params.id));
-  if (!task) {
-    res.status(404).json({ message: "Task not found" });
-    return;
-  }
-  res.json(task);
-});
-
-app.post("/api/tasks", (req, res) => {
-  const { value, error } = normalizeTaskPayload(req.body || {}, { partial: false });
-  if (error) {
-    res.status(400).json({ message: error });
-    return;
-  }
-
-  const now = new Date().toISOString();
-  const task = {
-    ...value,
-    id: value.id || createId(),
-    attachments: value.attachments ?? [],
-    subtasks: value.subtasks ?? [],
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  try {
-    insertTaskStmt.run({
-      id: task.id,
-      payload: JSON.stringify(task),
-      created_at: task.createdAt,
-      updated_at: task.updatedAt,
-    });
-  } catch (err) {
-    if (String(err.message).includes("UNIQUE constraint failed")) {
-      res.status(409).json({ message: "Task with the same id already exists" });
+app.get(
+  "/api/tasks/:id",
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM tasks WHERE id = $1 LIMIT 1", [
+      req.params.id,
+    ]);
+    const task = rowToTask(rows[0]);
+    if (!task) {
+      res.status(404).json({ message: "Task not found" });
       return;
     }
-    console.error("Failed to insert task", err);
-    res.status(500).json({ message: "Failed to save task" });
-    return;
-  }
+    res.json(task);
+  })
+);
 
-  res.status(201).json(task);
-});
-
-app.put("/api/tasks/:id", (req, res) => {
-  const existing = rowToTask(findTaskStmt.get(req.params.id));
-  if (!existing) {
-    res.status(404).json({ message: "Task not found" });
-    return;
-  }
-
-  const { value, error } = normalizeTaskPayload(req.body || {}, { partial: true });
-  if (error) {
-    res.status(400).json({ message: error });
-    return;
-  }
-
-  const updatedTask = {
-    ...existing,
-    ...value,
-    id: existing.id,
-    updatedAt: new Date().toISOString(),
-  };
-
-  try {
-    updateTaskStmt.run({
-      id: updatedTask.id,
-      payload: JSON.stringify(updatedTask),
-      updated_at: updatedTask.updatedAt,
-    });
-  } catch (err) {
-    console.error("Failed to update task", err);
-    res.status(500).json({ message: "Failed to update task" });
-    return;
-  }
-
-  res.json(updatedTask);
-});
-
-app.delete("/api/tasks/:id", (req, res) => {
-  const result = deleteTaskStmt.run(req.params.id);
-  if (result.changes === 0) {
-    res.status(404).json({ message: "Task not found" });
-    return;
-  }
-  res.status(204).send();
-});
-
-app.get("/api/features", (_req, res) => {
-  const features = listFeaturesStmt
-    .all()
-    .map(rowToFeature)
-    .filter(Boolean);
-  res.json(features);
-});
-
-app.get("/api/features/:id", (req, res) => {
-  const feature = rowToFeature(findFeatureStmt.get(req.params.id));
-  if (!feature) {
-    res.status(404).json({ message: "Feature not found" });
-    return;
-  }
-  res.json(feature);
-});
-
-app.post("/api/features", (req, res) => {
-  const { value, error } = normalizeFeaturePayload(req.body || {}, { partial: false });
-  if (error) {
-    res.status(400).json({ message: error });
-    return;
-  }
-
-  const now = new Date().toISOString();
-  const feature = {
-    ...value,
-    id: value.id || createId(),
-    tags: Array.isArray(value.tags) ? value.tags : [],
-    baseVotes: Number.isFinite(value.baseVotes) ? value.baseVotes : 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  try {
-    insertFeatureStmt.run({
-      id: feature.id,
-      payload: JSON.stringify(feature),
-      created_at: feature.createdAt,
-      updated_at: feature.updatedAt,
-    });
-  } catch (err) {
-    if (String(err.message).includes("UNIQUE constraint failed")) {
-      res.status(409).json({ message: "Feature with the same id already exists" });
+app.post(
+  "/api/tasks",
+  asyncHandler(async (req, res) => {
+    const { value, error } = normalizeTaskPayload(req.body || {}, { partial: false });
+    if (error) {
+      res.status(400).json({ message: error });
       return;
     }
-    console.error("Failed to insert feature", err);
-    res.status(500).json({ message: "Failed to save feature" });
-    return;
-  }
 
-  res.status(201).json(feature);
-});
+    const now = new Date().toISOString();
+    const task = {
+      ...value,
+      id: value.id || createId(),
+      attachments: value.attachments ?? [],
+      subtasks: value.subtasks ?? [],
+      createdAt: now,
+      updatedAt: now,
+    };
 
-app.put("/api/features/:id", (req, res) => {
-  const existing = rowToFeature(findFeatureStmt.get(req.params.id));
-  if (!existing) {
-    res.status(404).json({ message: "Feature not found" });
-    return;
-  }
+    try {
+      await pool.query(
+        "INSERT INTO tasks (id, payload, created_at, updated_at) VALUES ($1, $2, $3, $4)",
+        [task.id, task, task.createdAt, task.updatedAt]
+      );
+    } catch (err) {
+      if (String(err.message).includes("duplicate key value violates unique constraint")) {
+        res.status(409).json({ message: "Task with the same id already exists" });
+        return;
+      }
+      console.error("Failed to insert task", err);
+      res.status(500).json({ message: "Failed to save task" });
+      return;
+    }
 
-  const { value, error } = normalizeFeaturePayload(req.body || {}, { partial: true });
-  if (error) {
-    res.status(400).json({ message: error });
-    return;
-  }
+    res.status(201).json(task);
+  })
+);
 
-  const updatedFeature = {
-    ...existing,
-    ...value,
-    id: existing.id,
-    updatedAt: new Date().toISOString(),
-  };
+app.put(
+  "/api/tasks/:id",
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM tasks WHERE id = $1 LIMIT 1", [
+      req.params.id,
+    ]);
+    const existing = rowToTask(rows[0]);
+    if (!existing) {
+      res.status(404).json({ message: "Task not found" });
+      return;
+    }
 
-  try {
-    updateFeatureStmt.run({
-      id: updatedFeature.id,
-      payload: JSON.stringify(updatedFeature),
-      updated_at: updatedFeature.updatedAt,
-    });
-  } catch (err) {
-    console.error("Failed to update feature", err);
-    res.status(500).json({ message: "Failed to update feature" });
-    return;
-  }
+    const { value, error } = normalizeTaskPayload(req.body || {}, { partial: true });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
 
-  res.json(updatedFeature);
-});
+    const updatedTask = {
+      ...existing,
+      ...value,
+      id: existing.id,
+      updatedAt: new Date().toISOString(),
+    };
 
-app.delete("/api/features/:id", (req, res) => {
-  const result = deleteFeatureStmt.run(req.params.id);
-  if (result.changes === 0) {
-    res.status(404).json({ message: "Feature not found" });
-    return;
-  }
-  res.status(204).send();
-});
+    try {
+      await pool.query("UPDATE tasks SET payload = $1, updated_at = $2 WHERE id = $3", [
+        updatedTask,
+        updatedTask.updatedAt,
+        updatedTask.id,
+      ]);
+    } catch (err) {
+      console.error("Failed to update task", err);
+      res.status(500).json({ message: "Failed to update task" });
+      return;
+    }
+
+    res.json(updatedTask);
+  })
+);
+
+app.delete(
+  "/api/tasks/:id",
+  asyncHandler(async (req, res) => {
+    const result = await pool.query("DELETE FROM tasks WHERE id = $1", [req.params.id]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Task not found" });
+      return;
+    }
+    res.status(204).send();
+  })
+);
+
+app.get(
+  "/api/features",
+  asyncHandler(async (_req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM features ORDER BY updated_at DESC");
+    const features = rows.map(rowToFeature).filter(Boolean);
+    res.json(features);
+  })
+);
+
+app.get(
+  "/api/features/:id",
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM features WHERE id = $1 LIMIT 1", [
+      req.params.id,
+    ]);
+    const feature = rowToFeature(rows[0]);
+    if (!feature) {
+      res.status(404).json({ message: "Feature not found" });
+      return;
+    }
+    res.json(feature);
+  })
+);
+
+app.post(
+  "/api/features",
+  asyncHandler(async (req, res) => {
+    const { value, error } = normalizeFeaturePayload(req.body || {}, { partial: false });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const feature = {
+      ...value,
+      id: value.id || createId(),
+      tags: Array.isArray(value.tags) ? value.tags : [],
+      baseVotes: Number.isFinite(value.baseVotes) ? value.baseVotes : 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await pool.query(
+        "INSERT INTO features (id, payload, created_at, updated_at) VALUES ($1, $2, $3, $4)",
+        [feature.id, feature, feature.createdAt, feature.updatedAt]
+      );
+    } catch (err) {
+      if (String(err.message).includes("duplicate key value violates unique constraint")) {
+        res.status(409).json({ message: "Feature with the same id already exists" });
+        return;
+      }
+      console.error("Failed to insert feature", err);
+      res.status(500).json({ message: "Failed to save feature" });
+      return;
+    }
+
+    res.status(201).json(feature);
+  })
+);
+
+app.put(
+  "/api/features/:id",
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query("SELECT payload FROM features WHERE id = $1 LIMIT 1", [
+      req.params.id,
+    ]);
+    const existing = rowToFeature(rows[0]);
+    if (!existing) {
+      res.status(404).json({ message: "Feature not found" });
+      return;
+    }
+
+    const { value, error } = normalizeFeaturePayload(req.body || {}, { partial: true });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+
+    const updatedFeature = {
+      ...existing,
+      ...value,
+      id: existing.id,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await pool.query("UPDATE features SET payload = $1, updated_at = $2 WHERE id = $3", [
+        updatedFeature,
+        updatedFeature.updatedAt,
+        updatedFeature.id,
+      ]);
+    } catch (err) {
+      console.error("Failed to update feature", err);
+      res.status(500).json({ message: "Failed to update feature" });
+      return;
+    }
+
+    res.json(updatedFeature);
+  })
+);
+
+app.delete(
+  "/api/features/:id",
+  asyncHandler(async (req, res) => {
+    const result = await pool.query("DELETE FROM features WHERE id = $1", [req.params.id]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ message: "Feature not found" });
+      return;
+    }
+    res.status(204).send();
+  })
+);
 
 const staticDir = __dirname;
 app.use(express.static(staticDir));
@@ -273,26 +269,38 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ message: "Unexpected server error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server ready at http://localhost:${PORT}`);
-});
+initializeDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server ready at http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to initialize database", err);
+    process.exit(1);
+  });
 
 function rowToTask(row) {
-  if (!row) return null;
-  try {
-    return JSON.parse(row.payload);
-  } catch (err) {
-    console.error("Failed to parse task row", err);
-    return null;
-  }
+  return parsePayload(row, "task");
 }
 
 function rowToFeature(row) {
+  return parsePayload(row, "feature");
+}
+
+function parsePayload(row, label) {
   if (!row) return null;
+  const rawPayload = row.payload;
+  if (rawPayload === null || rawPayload === undefined) {
+    return null;
+  }
+  if (typeof rawPayload === "object") {
+    return rawPayload;
+  }
   try {
-    return JSON.parse(row.payload);
+    return JSON.parse(rawPayload);
   } catch (err) {
-    console.error("Failed to parse feature row", err);
+    console.error(`Failed to parse ${label} row`, err);
     return null;
   }
 }
@@ -318,7 +326,7 @@ function normalizeTaskPayload(raw, { partial } = { partial: false }) {
   if (raw.deadline !== undefined) {
     const deadlineDate = new Date(raw.deadline);
     if (Number.isNaN(deadlineDate.getTime())) {
-      return { error: "Field \"deadline\" must be a valid date" };
+      return { error: 'Field "deadline" must be a valid date' };
     }
     payload.deadline = deadlineDate.toISOString();
   }
@@ -443,13 +451,36 @@ function normalizeCollection(items, mapper) {
     .filter(Boolean);
 }
 
-function ensureSeedData() {
-  seedTasks();
-  seedFeatures();
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS features (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+
+  await ensureSeedData();
 }
 
-function seedTasks() {
-  const { count } = countTasksStmt.get();
+async function ensureSeedData() {
+  await seedTasks();
+  await seedFeatures();
+}
+
+async function seedTasks() {
+  const { rows } = await pool.query("SELECT COUNT(1)::int AS count FROM tasks");
+  const count = Number(rows[0]?.count ?? 0);
   if (count > 0) return;
 
   const now = new Date();
@@ -488,19 +519,17 @@ function seedTasks() {
     updatedAt: new Date().toISOString(),
   }));
 
-  const insert = db.prepare(
-    "INSERT INTO tasks (id, payload, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  );
-  const insertMany = db.transaction((records) => {
-    for (const task of records) {
-      insert.run(task.id, JSON.stringify(task), task.createdAt, task.updatedAt);
-    }
-  });
-  insertMany(tasks);
+  const insertQuery =
+    "INSERT INTO tasks (id, payload, created_at, updated_at) VALUES ($1, $2, $3, $4)";
+  for (const task of tasks) {
+    // Sequential inserts keep the logic simple for a tiny seed dataset.
+    await pool.query(insertQuery, [task.id, task, task.createdAt, task.updatedAt]);
+  }
 }
 
-function seedFeatures() {
-  const { count } = countFeaturesStmt.get();
+async function seedFeatures() {
+  const { rows } = await pool.query("SELECT COUNT(1)::int AS count FROM features");
+  const count = Number(rows[0]?.count ?? 0);
   if (count > 0) return;
 
   const features = [
@@ -550,15 +579,11 @@ function seedFeatures() {
     updatedAt: new Date().toISOString(),
   }));
 
-  const insert = db.prepare(
-    "INSERT INTO features (id, payload, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  );
-  const insertMany = db.transaction((records) => {
-    for (const feature of records) {
-      insert.run(feature.id, JSON.stringify(feature), feature.createdAt, feature.updatedAt);
-    }
-  });
-  insertMany(features);
+  const insertQuery =
+    "INSERT INTO features (id, payload, created_at, updated_at) VALUES ($1, $2, $3, $4)";
+  for (const feature of features) {
+    await pool.query(insertQuery, [feature.id, feature, feature.createdAt, feature.updatedAt]);
+  }
 }
 
 function dateFromNow(baseDate, days, hours = 12) {
@@ -573,4 +598,9 @@ function createId() {
     return randomUUID();
   }
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSSLConfig(url) {
+  if (!url) return undefined;
+  return /localhost|127\.0\.0\.1/i.test(url) ? undefined : { rejectUnauthorized: false };
 }

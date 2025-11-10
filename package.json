@@ -5,9 +5,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.6.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.19.2",
-    "jsdom": "^27.1.0"
+    "jsdom": "^27.1.0",
+    "pg": "^8.16.3"
   }
 }
