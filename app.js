@@ -1,8 +1,9 @@
 (() => {
   const STORAGE_KEYS = {
-    tasks: "inform_tasks_v1",
     user: "inform_user_v1",
   };
+
+  const API_BASE_URL = globalThis.APP_API_BASE_URL || "/api";
 
   const DEFAULT_USER = {
     id: "admin",
@@ -75,6 +76,10 @@
 
   let allTasks = [];
   let currentUser = null;
+  let isLoadingTasks = true;
+  let tasksError = null;
+  let hashListenerBound = false;
+  let pendingTaskHashId = null;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
@@ -93,10 +98,12 @@
     }
 
     currentUser = ensureUserProfile();
-    allTasks = ensureSeedTasks();
     renderUserChip();
     renderTasksView();
     bindStaticListeners();
+    bindHashChangeListener();
+    openTaskFromHash();
+    loadTasksFromServer();
   }
 
   function bindStaticListeners() {
@@ -147,97 +154,22 @@
     return DEFAULT_USER;
   }
 
-  function ensureSeedTasks() {
-    const raw = safeStorageGet(STORAGE_KEYS.tasks);
-    if (raw) {
-      try {
-        const stored = JSON.parse(raw);
-        if (Array.isArray(stored) && stored.length) {
-          return stored;
-        }
-      } catch {
-        /* ignore bad payload */
-      }
+  async function loadTasksFromServer() {
+    isLoadingTasks = true;
+    tasksError = null;
+    renderTasksView();
+    try {
+      const remoteTasks = await apiFetchTasks();
+      allTasks = Array.isArray(remoteTasks) ? remoteTasks : [];
+      openPendingTaskFromHash();
+    } catch (error) {
+      console.error("Failed to load tasks", error);
+      tasksError =
+        error instanceof Error ? error.message : "Не удалось загрузить задачи. Попробуйте позже.";
+    } finally {
+      isLoadingTasks = false;
+      renderTasksView();
     }
-    const seeded = createSeedTasks();
-    safeStorageSet(STORAGE_KEYS.tasks, JSON.stringify(seeded));
-    return seeded;
-  }
-
-  function createSeedTasks() {
-    return [
-      {
-        id: uid(),
-        title: "Подготовить пост к Дню открытых дверей",
-        description:
-          "Собрать тезисы у учебного отдела, подготовить визуал и согласовать с руководителем.",
-        deadline: dateFromNow(2, 16),
-        priority: "high",
-        status: "in_progress",
-        responsible: "Анна Лебедева",
-        attachments: [
-          {
-            id: uid(),
-            label: "Бриф в Notion",
-            url: "https://example.com/notion-brief",
-          },
-        ],
-        subtasks: [
-          { id: uid(), text: "Получить тезисы", done: true },
-          { id: uid(), text: "Согласовать визуал", done: false },
-          { id: uid(), text: "Запланировать публикацию", done: false },
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: uid(),
-        title: "Съёмка интервью с деканом",
-        description:
-          "Организовать площадку, подготовить вопросы, обеспечить техническую команду.",
-        deadline: dateFromNow(5, 11),
-        priority: "medium",
-        status: "pending",
-        responsible: "Илья Гордеев",
-        attachments: [],
-        subtasks: [
-          { id: uid(), text: "Согласовать время", done: false },
-          { id: uid(), text: "Подготовить вопросы", done: false },
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: uid(),
-        title: "Аналитика по публикациям за март",
-        description:
-          "Собрать статистику по всем соцсетям, подготовить презентацию с выводами.",
-        deadline: dateFromNow(-1, 18),
-        priority: "low",
-        status: "done",
-        responsible: "Мария Сергеева",
-        attachments: [
-          {
-            id: uid(),
-            label: "Google Sheets",
-            url: "https://example.com/report",
-          },
-        ],
-        subtasks: [
-          { id: uid(), text: "Сбор данных", done: true },
-          { id: uid(), text: "Подготовка слайдов", done: true },
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  function dateFromNow(daysOffset, hour = 12) {
-    const date = new Date();
-    date.setDate(date.getDate() + daysOffset);
-    date.setHours(hour, 0, 0, 0);
-    return date.toISOString();
   }
 
   function renderUserChip() {
@@ -339,6 +271,29 @@
     const section = document.getElementById("tasksSection");
     if (!section) return;
 
+    if (isLoadingTasks) {
+      section.innerHTML = `
+        <div class="empty-state">
+          <h3>Загружаем задачи...</h3>
+          <p>Подождите немного, мы уже тянем данные из общей базы.</p>
+        </div>
+      `;
+      return;
+    }
+
+    if (tasksError) {
+      section.innerHTML = `
+        <div class="empty-state">
+          <h3>Не удалось получить список задач</h3>
+          <p>${escapeHtml(tasksError)}</p>
+          <button class="primary-btn" type="button" data-role="reload-tasks">Повторить попытку</button>
+        </div>
+      `;
+      const retryBtn = section.querySelector("[data-role='reload-tasks']");
+      if (retryBtn) retryBtn.addEventListener("click", () => loadTasksFromServer());
+      return;
+    }
+
     if (!tasks.length) {
       section.innerHTML = `
         <div class="empty-state">
@@ -423,6 +378,13 @@
 
   function openTaskDetailModal(taskId) {
     const modal = createModal();
+    pendingTaskHashId = null;
+    setTaskHash(taskId);
+    const originalClose = modal.close;
+    modal.close = () => {
+      clearTaskHash(taskId);
+      originalClose();
+    };
 
     const rerender = () => {
       const task = allTasks.find((item) => item.id === taskId);
@@ -471,12 +433,15 @@
       : "<p>Нет подзадач</p>";
 
     return `
-      <div class="modal__header">
-        <div>
+      <div class="modal__header modal__header--stacked">
+        <div class="modal__actions modal__actions--row">
+          <button class="ghost-btn" type="button" data-role="copy-task-link">Скопировать ссылку</button>
+          <button class="modal__close" data-close-modal aria-label="Закрыть">×</button>
+        </div>
+        <div class="modal__title-block">
           <h2 class="modal__title">${escapeHtml(task.title)}</h2>
           <p class="panel__subtitle">Дедлайн: ${formatDeadline(task.deadline)}</p>
         </div>
-        <button class="modal__close" data-close-modal aria-label="Закрыть">×</button>
       </div>
 
       <div class="detail-meta">
@@ -542,36 +507,52 @@
     const statusForm = container.querySelector("#statusForm");
 
     if (statusForm) {
-      statusForm.addEventListener("submit", (event) => {
+      statusForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const formData = new FormData(statusForm);
         const newStatus = formData.get("status");
-        updateTasks((tasks) =>
-          tasks.map((item) =>
-            item.id === task.id
-              ? { ...item, status: newStatus, updatedAt: new Date().toISOString() }
-              : item
-          )
-        );
-        rerender();
+        if (!newStatus || newStatus === task.status) {
+          rerender();
+          return;
+        }
+        try {
+          await handleTaskUpdate(task.id, { status: newStatus });
+          rerender();
+        } catch (error) {
+          showErrorMessage(getErrorMessage(error, "Не удалось обновить статус задачи"));
+        }
       });
     }
 
     container.querySelectorAll("[data-role='subtask-toggle']").forEach((checkbox) => {
-      checkbox.addEventListener("change", (event) => {
+      checkbox.addEventListener("change", async (event) => {
         const subtaskId = event.target.dataset.id;
-        updateTasks((tasks) =>
-          tasks.map((item) => {
-            if (item.id !== task.id) return item;
-            const updatedSubtasks = item.subtasks.map((subtask) =>
-              subtask.id === subtaskId ? { ...subtask, done: event.target.checked } : subtask
-            );
-            return { ...item, subtasks: updatedSubtasks, updatedAt: new Date().toISOString() };
-          })
+        const updatedSubtasks = task.subtasks.map((subtask) =>
+          subtask.id === subtaskId ? { ...subtask, done: event.target.checked } : subtask
         );
-        rerender();
+        try {
+          await handleTaskUpdate(task.id, { subtasks: updatedSubtasks });
+          rerender();
+        } catch (error) {
+          event.target.checked = !event.target.checked;
+          showErrorMessage(getErrorMessage(error, "Не удалось обновить подзадачу"));
+        }
       });
     });
+
+    const copyLinkBtn = container.querySelector("[data-role='copy-task-link']");
+    if (copyLinkBtn) {
+      copyLinkBtn.addEventListener("click", async () => {
+        try {
+          await copyTaskLink(task.id);
+          window.alert("Ссылка на задачу скопирована");
+        } catch (error) {
+          showErrorMessage(
+            getErrorMessage(error, "Не удалось скопировать ссылку на задачу")
+          );
+        }
+      });
+    }
 
     const editBtn = container.querySelector("[data-role='edit-task']");
     if (editBtn) {
@@ -583,11 +564,15 @@
 
     const deleteBtn = container.querySelector("[data-role='delete-task']");
     if (deleteBtn) {
-      deleteBtn.addEventListener("click", () => {
+      deleteBtn.addEventListener("click", async () => {
         const confirmed = window.confirm("Удалить эту задачу?");
         if (!confirmed) return;
-        updateTasks((tasks) => tasks.filter((item) => item.id !== task.id));
-        closeModal();
+        try {
+          await handleTaskDelete(task.id);
+          closeModal();
+        } catch (error) {
+          showErrorMessage(getErrorMessage(error, "Не удалось удалить задачу"));
+        }
       });
     }
   }
@@ -739,7 +724,7 @@
     const form = container.querySelector("#taskForm");
     if (!form) return;
 
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!form.reportValidity()) return;
       const formData = new FormData(form);
@@ -757,14 +742,20 @@
         updatedAt: new Date().toISOString(),
       };
 
-      updateTasks((tasks) => {
+      try {
         if (isEdit) {
-          return tasks.map((item) => (item.id === payload.id ? { ...item, ...payload } : item));
+          await handleTaskUpdate(payload.id, payload);
+        } else {
+          await handleTaskCreate(payload);
         }
-        return [payload, ...tasks];
-      });
-
-      closeModal();
+        closeModal();
+      } catch (error) {
+        const message = getErrorMessage(
+          error,
+          isEdit ? "Не удалось сохранить задачу" : "Не удалось создать задачу"
+        );
+        showErrorMessage(message);
+      }
     });
 
     container.querySelectorAll("[data-role='add-subtask']").forEach((btn) => {
@@ -891,11 +882,195 @@
     };
   }
 
-  function updateTasks(updater) {
-    const nextTasks = typeof updater === "function" ? updater([...allTasks]) : updater;
+  async function handleTaskCreate(payload) {
+    try {
+      const created = await apiCreateTask(payload);
+      applyTasksState([created, ...allTasks]);
+      return created;
+    } catch (error) {
+      throw enhanceError(error, "Не удалось создать задачу");
+    }
+  }
+
+  async function handleTaskUpdate(taskId, updates) {
+    try {
+      const saved = await apiUpdateTask(taskId, updates);
+      applyTasksState(allTasks.map((task) => (task.id === saved.id ? saved : task)));
+      return saved;
+    } catch (error) {
+      throw enhanceError(error, "Не удалось обновить задачу");
+    }
+  }
+
+  async function handleTaskDelete(taskId) {
+    try {
+      await apiDeleteTask(taskId);
+      applyTasksState(allTasks.filter((task) => task.id !== taskId));
+    } catch (error) {
+      throw enhanceError(error, "Не удалось удалить задачу");
+    }
+  }
+
+  function applyTasksState(nextTasks) {
     allTasks = nextTasks;
-    safeStorageSet(STORAGE_KEYS.tasks, JSON.stringify(allTasks));
     renderTasksView();
+  }
+
+  function bindHashChangeListener() {
+    if (hashListenerBound) return;
+    hashListenerBound = true;
+    window.addEventListener("hashchange", () => {
+      openTaskFromHash();
+    });
+  }
+
+  function openTaskFromHash() {
+    const taskId = getTaskIdFromHash();
+    if (!taskId) {
+      pendingTaskHashId = null;
+      return;
+    }
+    const taskExists = allTasks.some((task) => task.id === taskId);
+    if (taskExists) {
+      openTaskDetailModal(taskId);
+      pendingTaskHashId = null;
+    } else {
+      pendingTaskHashId = taskId;
+    }
+  }
+
+  function openPendingTaskFromHash() {
+    if (!pendingTaskHashId) return;
+    const taskExists = allTasks.some((task) => task.id === pendingTaskHashId);
+    if (taskExists) {
+      openTaskDetailModal(pendingTaskHashId);
+      pendingTaskHashId = null;
+    }
+  }
+
+  function getTaskIdFromHash() {
+    const { hash } = window.location;
+    if (!hash || !hash.startsWith("#task=")) return null;
+    return decodeURIComponent(hash.slice(6));
+  }
+
+  function setTaskHash(taskId) {
+    if (!taskId) return;
+    const url = new URL(window.location.href);
+    url.hash = `task=${encodeURIComponent(taskId)}`;
+    history.replaceState(null, "", url);
+  }
+
+  function clearTaskHash(taskId) {
+    const current = getTaskIdFromHash();
+    if (!current) {
+      pendingTaskHashId = null;
+      return;
+    }
+    if (!taskId || current === taskId) {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      history.replaceState(null, "", url);
+      pendingTaskHashId = null;
+    }
+  }
+
+  function getTaskShareUrl(taskId) {
+    const { origin, pathname, search } = window.location;
+    return `${origin}${pathname}${search}#task=${encodeURIComponent(taskId)}`;
+  }
+
+  async function copyTaskLink(taskId) {
+    const shareUrl = getTaskShareUrl(taskId);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+      return;
+    }
+    const tempInput = document.createElement("textarea");
+    tempInput.value = shareUrl;
+    tempInput.setAttribute("readonly", "");
+    tempInput.style.position = "absolute";
+    tempInput.style.left = "-9999px";
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand("copy");
+    document.body.removeChild(tempInput);
+  }
+
+  async function apiFetchTasks() {
+    return requestJson("/tasks");
+  }
+
+  async function apiCreateTask(payload) {
+    return requestJson("/tasks", { method: "POST", body: payload });
+  }
+
+  async function apiUpdateTask(taskId, updates) {
+    return requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: "PUT", body: updates });
+  }
+
+  async function apiDeleteTask(taskId) {
+    await requestJson(`/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+  }
+
+  async function requestJson(endpoint, options = {}) {
+    const url = buildApiUrl(endpoint);
+    const config = {
+      method: options.method ?? "GET",
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    };
+    if (options.body !== undefined) {
+      config.headers["Content-Type"] = "application/json";
+      config.body =
+        typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+    }
+    const response = await fetch(url, config);
+    const text = await response.text();
+    const payload = text ? safeJsonParse(text) : null;
+    if (!response.ok) {
+      const message =
+        (payload && (payload.message || payload.error)) ||
+        `Запрос завершился с ошибкой (${response.status})`;
+      throw new Error(message);
+    }
+    return payload;
+  }
+
+  function buildApiUrl(pathname) {
+    const base = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+    const suffix = pathname.startsWith("/") ? pathname : `/${pathname}`;
+    return `${base}${suffix}`;
+  }
+
+  function safeJsonParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function enhanceError(error, fallback) {
+    if (error instanceof Error) {
+      if (!error.message && fallback) error.message = fallback;
+      return error;
+    }
+    if (typeof error === "string") return new Error(error);
+    if (error && typeof error === "object" && "message" in error && error.message) {
+      return new Error(String(error.message));
+    }
+    return new Error(fallback || "Неизвестная ошибка");
+  }
+
+  function getErrorMessage(error, fallback) {
+    return enhanceError(error, fallback).message;
+  }
+
+  function showErrorMessage(message) {
+    window.alert(message);
   }
 
   function formatDeadline(isoString) {

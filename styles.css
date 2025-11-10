@@ -605,6 +605,30 @@ body {
   gap: 16px;
 }
 
+.modal__header--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.modal__actions--row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal__actions--row .ghost-btn {
+  margin-right: auto;
+}
+
+.modal__title-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .modal__title {
   margin: 0;
   font-size: 26px;

@@ -6,6 +6,7 @@
     adminMode: "inform_roadmap_admin_mode",
   };
 
+  const API_BASE_URL = globalThis.APP_API_BASE_URL || "/api";
   const ADMIN_PASSWORD = "admin";
 
   const STATUS_META = {
@@ -15,72 +16,11 @@
     shipped: { label: "Выпущено", className: "status-chip status-done", order: 3 },
   };
 
-  const DEFAULT_FEATURES = [
-    {
-      id: "automation-checklists",
-      title: "Автоматизация чек-листов",
-      description: "Чек-листы под задачами с автоматическим обновлением статуса и дедлайна.",
-      status: "in_progress",
-      eta: "ноябрь 2025",
-      category: "Задачи",
-      tags: ["Workflow", "Automation"],
-      baseVotes: 32,
-    },
-    {
-      id: "content-calendar-sync",
-      title: "Синхронизация контент-плана с календарями",
-      description: "Экспорт релизов в Google Calendar и подписка всей команды на изменения.",
-      status: "planned",
-      eta: "декабрь 2025",
-      category: "Контент",
-      tags: ["Calendar", "Sync"],
-      baseVotes: 24,
-    },
-    {
-      id: "role-permissions",
-      title: "Роли и права доступа",
-      description: "Отдельные роли для редактора, дизайнера и администратора с разными правами.",
-      status: "planned",
-      eta: "январь 2026",
-      category: "Команда",
-      tags: ["Security"],
-      baseVotes: 41,
-    },
-    {
-      id: "notifications-center",
-      title: "Центр уведомлений",
-      description: "Уведомления о дедлайнах, комментариях и упоминаниях прямо в приложении.",
-      status: "in_progress",
-      eta: "декабрь 2025",
-      category: "Коммуникации",
-      tags: ["Realtime"],
-      baseVotes: 35,
-    },
-    {
-      id: "ai-post-helper",
-      title: "AI-помощник для постов",
-      description: "Генерация черновиков постов и заголовков на основе брифа и истории публикаций.",
-      status: "research",
-      eta: "Q1 2026",
-      category: "Контент",
-      tags: ["AI", "Эксперимент"],
-      baseVotes: 18,
-    },
-    {
-      id: "analytics-v2",
-      title: "Расширенная аналитика контента",
-      description: "Сводные отчёты по соцсетям с рекомендациями и экспортом в .xlsx.",
-      status: "planned",
-      eta: "февраль 2026",
-      category: "Аналитика",
-      tags: ["Data"],
-      baseVotes: 29,
-    },
-  ];
-
   const votesState = loadVotes();
   const ideasState = loadIdeas();
-  let featureState = loadFeatures();
+  let featureState = [];
+  let isLoadingFeatures = true;
+  let featuresError = null;
   let isAdmin = loadAdminMode();
   let editingFeatureId = null;
 
@@ -105,6 +45,7 @@
     bindVotes();
     bindAdminControls();
     initFeatureStatusSelect();
+    loadFeaturesFromServer();
   }
 
   function renderHeroDate() {
@@ -130,6 +71,43 @@
 
   function renderFeatures() {
     if (!roadmapList) return;
+
+    if (isLoadingFeatures) {
+      roadmapList.innerHTML = `
+        <div class="roadmap-empty">
+          <h3>Загружаем фичи...</h3>
+          <p>Подождите немного, данные подтягиваются из общей базы.</p>
+        </div>
+      `;
+      return;
+    }
+
+    if (featuresError && !featureState.length) {
+      roadmapList.innerHTML = `
+        <div class="roadmap-empty">
+          <h3>Не удалось загрузить фичи</h3>
+          <p>${escapeHtml(featuresError)}</p>
+          <button class="primary-btn" type="button" data-role="reload-features">Повторить</button>
+        </div>
+      `;
+      const retryBtn = roadmapList.querySelector("[data-role='reload-features']");
+      if (retryBtn) retryBtn.addEventListener("click", () => loadFeaturesFromServer());
+      return;
+    }
+
+    if (!featureState.length) {
+      roadmapList.innerHTML = `
+        <div class="roadmap-empty">
+          <h3>Пока нет ни одной фичи</h3>
+          <p>Зайдите в режим администратора, чтобы добавить первую идею.</p>
+        </div>
+      `;
+      if (isAdmin) {
+        renderAdminFeatureList();
+      }
+      return;
+    }
+
     const items = [...featureState].sort((a, b) => {
       const orderA = STATUS_META[a.status]?.order ?? 99;
       const orderB = STATUS_META[b.status]?.order ?? 99;
@@ -239,78 +217,54 @@
 
 
 
-    if (featureForm) {
-
-      featureForm.addEventListener("submit", (event) => {
-
+        if (featureForm) {
+      featureForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-
         const formData = new FormData(featureForm);
-
         const title = formData.get("title")?.trim();
-
         const description = formData.get("description")?.trim();
-
         if (!title || !description) return;
-
         const payload = {
-
           title,
-
           description,
-
-          status: formData.get("status") || "planned",
-
+          status: formData.get("status")?.trim() || "planned",
           eta: formData.get("eta")?.trim() || "TBA",
-
           category: formData.get("category")?.trim() || "Категория",
-
           tags: (formData.get("tags") || "")
-
             .split(",")
-
             .map((tag) => tag.trim())
-
             .filter(Boolean),
-
-          baseVotes: Number(formData.get("votes")) || 0,
-
+          baseVotes: Number.isNaN(Number(formData.get("votes")))
+            ? 0
+            : Math.max(0, Number(formData.get("votes")) || 0),
         };
-
         const existingId = formData.get("featureId")?.trim();
-
-        if (existingId) {
-
-          featureState = featureState.map((feature) =>
-
-            feature.id === existingId ? { ...feature, ...payload } : feature
-
-          );
-
-        } else {
-
-          const newFeature = {
-
-            id: `feature-${Date.now()}`,
-
-            ...payload,
-
-          };
-
-          featureState = [newFeature, ...featureState];
-
+        const originalLabel = featureSubmitBtn?.textContent;
+        if (featureSubmitBtn) {
+          featureSubmitBtn.disabled = true;
+          featureSubmitBtn.textContent = existingId ? "Сохраняем..." : "Добавляем...";
         }
-
-        persistFeatures();
-
-        resetFeatureEditor();
-
-        renderStats();
-
-        renderFeatures();
-
+        try {
+          if (existingId) {
+            await handleFeatureUpdate(existingId, payload);
+          } else {
+            await handleFeatureCreate(payload);
+          }
+          resetFeatureEditor();
+        } catch (error) {
+          showErrorMessage(
+            getErrorMessage(
+              error,
+              existingId ? "Не удалось обновить фичу" : "Не удалось создать фичу"
+            )
+          );
+        } finally {
+          if (featureSubmitBtn) {
+            featureSubmitBtn.disabled = false;
+            featureSubmitBtn.textContent = originalLabel || "Сохранить";
+          }
+        }
       });
-
     }
 
 
@@ -327,61 +281,48 @@
 
 
 
-    if (adminFeatureList) {
-      adminFeatureList.addEventListener("change", (event) => {
+        if (adminFeatureList) {
+      adminFeatureList.addEventListener("change", async (event) => {
         const select = event.target.closest("[data-role='status']");
         if (!select) return;
         const row = select.closest(".admin-feature-row");
         if (!row) return;
-        updateFeatureStatus(row.dataset.id, select.value);
+        const featureId = row.dataset.id;
+        const prevStatus = featureState.find((item) => item.id === featureId)?.status || select.value;
+        select.disabled = true;
+        try {
+          await updateFeatureStatus(featureId, select.value);
+        } catch (error) {
+          showErrorMessage(getErrorMessage(error, "Не удалось обновить статус фичи"));
+          select.value = prevStatus;
+        } finally {
+          select.disabled = false;
+        }
       });
 
-
-
-      adminFeatureList.addEventListener("click", (event) => {
-
+      adminFeatureList.addEventListener("click", async (event) => {
         const editBtn = event.target.closest("[data-role='edit']");
-
         if (editBtn) {
-
           const row = editBtn.closest(".admin-feature-row");
-
           if (row) {
-
             startFeatureEdit(row.dataset.id);
-
           }
-
           return;
-
         }
-
-
 
         const removeBtn = event.target.closest("[data-role='remove']");
-
         if (!removeBtn) return;
-
         const row = removeBtn.closest(".admin-feature-row");
-
         if (!row) return;
-
-        if (confirm("Удалить эту фичу?")) {
-
-          removeFeature(row.dataset.id);
-
+        if (!confirm("Удалить фичу?")) return;
+        try {
+          await removeFeature(row.dataset.id);
+        } catch (error) {
+          showErrorMessage(getErrorMessage(error, "Не удалось удалить фичу"));
         }
-
       });
-
-
-
-
-
-
-
-
     }
+
 
     updateAdminUI();
   }
@@ -404,6 +345,21 @@
 
       return;
 
+    }
+
+    if (isLoadingFeatures) {
+      adminFeatureList.innerHTML = "<p>Загружаем список...</p>";
+      return;
+    }
+
+    if (featuresError) {
+      adminFeatureList.innerHTML = `<p class="text-danger">${escapeHtml(featuresError)}</p>`;
+      return;
+    }
+
+    if (!featureState.length) {
+      adminFeatureList.innerHTML = "<p>Фич пока нет.</p>";
+      return;
     }
 
     adminFeatureList.innerHTML = featureState
@@ -666,26 +622,20 @@
 
 
 
-  function updateFeatureStatus(featureId, status) {
-    featureState = featureState.map((feature) =>
-      feature.id === featureId ? { ...feature, status } : feature
-    );
-    persistFeatures();
-    renderStats();
-    renderFeatures();
+  async function updateFeatureStatus(featureId, status) {
+    if (!featureId) return;
+    await handleFeatureUpdate(featureId, { status });
   }
 
-  function removeFeature(featureId) {
-    featureState = featureState.filter((feature) => feature.id !== featureId);
+  async function removeFeature(featureId) {
+    if (!featureId) return;
+    await handleFeatureDelete(featureId);
     if (editingFeatureId === featureId) {
       resetFeatureEditor();
     }
     delete votesState.counts[featureId];
     delete votesState.choices[featureId];
     persistVotes();
-    persistFeatures();
-    renderStats();
-    renderFeatures();
   }
 
   function getVotes(feature) {
@@ -725,30 +675,9 @@
     }
   }
 
-  function loadFeatures() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.features);
-      if (!raw) {
-        localStorage.setItem(STORAGE_KEYS.features, JSON.stringify(DEFAULT_FEATURES));
-        return [...DEFAULT_FEATURES];
-      }
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) {
-        return parsed;
-      }
-      return [...DEFAULT_FEATURES];
-    } catch {
-      return [...DEFAULT_FEATURES];
-    }
-  }
+  
 
-  function persistFeatures() {
-    try {
-      localStorage.setItem(STORAGE_KEYS.features, JSON.stringify(featureState));
-    } catch {
-      /* ignore */
-    }
-  }
+  
 
   function loadAdminMode() {
     try {
@@ -764,6 +693,127 @@
     } catch {
       /* ignore */
     }
+  }
+
+  async function loadFeaturesFromServer() {
+    isLoadingFeatures = true;
+    featuresError = null;
+    renderFeatures();
+    try {
+      const remoteFeatures = await apiFetchFeatures();
+      isLoadingFeatures = false;
+      applyFeatureState(Array.isArray(remoteFeatures) ? remoteFeatures : []);
+    } catch (error) {
+      featuresError = getErrorMessage(error, "Не удалось загрузить фичи");
+      isLoadingFeatures = false;
+      renderFeatures();
+    }
+  }
+
+  function applyFeatureState(nextFeatures) {
+    featureState = nextFeatures;
+    featuresError = null;
+    renderStats();
+    renderFeatures();
+  }
+
+  async function handleFeatureCreate(payload) {
+    const created = await apiCreateFeature(payload);
+    const next = [created, ...featureState.filter((item) => item.id !== created.id)];
+    applyFeatureState(next);
+    return created;
+  }
+
+  async function handleFeatureUpdate(featureId, updates) {
+    const updated = await apiUpdateFeature(featureId, updates);
+    applyFeatureState(
+      featureState.map((feature) => (feature.id === updated.id ? updated : feature))
+    );
+    return updated;
+  }
+
+  async function handleFeatureDelete(featureId) {
+    await apiDeleteFeature(featureId);
+    applyFeatureState(featureState.filter((feature) => feature.id !== featureId));
+  }
+
+  async function apiFetchFeatures() {
+    return requestJson("/features");
+  }
+
+  async function apiCreateFeature(payload) {
+    return requestJson("/features", { method: "POST", body: payload });
+  }
+
+  async function apiUpdateFeature(featureId, updates) {
+    return requestJson(`/features/${encodeURIComponent(featureId)}`, {
+      method: "PUT",
+      body: updates,
+    });
+  }
+
+  async function apiDeleteFeature(featureId) {
+    await requestJson(`/features/${encodeURIComponent(featureId)}`, { method: "DELETE" });
+  }
+
+  async function requestJson(endpoint, options = {}) {
+    const url = buildApiUrl(endpoint);
+    const config = {
+      method: options.method ?? "GET",
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    };
+    if (options.body !== undefined) {
+      config.headers["Content-Type"] = "application/json";
+      config.body =
+        typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+    }
+    const response = await fetch(url, config);
+    const text = await response.text();
+    const payload = text ? safeJsonParse(text) : null;
+    if (!response.ok) {
+      const message =
+        (payload && (payload.message || payload.error)) ||
+        `Запрос завершился с ошибкой (${response.status})`;
+      throw new Error(message);
+    }
+    return payload;
+  }
+
+  function buildApiUrl(pathname) {
+    const base = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+    const suffix = pathname.startsWith("/") ? pathname : `/${pathname}`;
+    return `${base}${suffix}`;
+  }
+
+  function safeJsonParse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function enhanceError(error, fallback) {
+    if (error instanceof Error) {
+      if (!error.message && fallback) error.message = fallback;
+      return error;
+    }
+    if (typeof error === "string") return new Error(error);
+    if (error && typeof error === "object" && "message" in error && error.message) {
+      return new Error(String(error.message));
+    }
+    return new Error(fallback || "Неизвестная ошибка");
+  }
+
+  function getErrorMessage(error, fallback) {
+    return enhanceError(error, fallback).message;
+  }
+
+  function showErrorMessage(message) {
+    window.alert(message);
   }
 
   function escapeHtml(value = "") {
