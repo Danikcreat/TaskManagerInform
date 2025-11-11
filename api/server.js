@@ -561,6 +561,8 @@ async function ensureDefaultSuperAdmin() {
     return;
   }
 
+  const normalizedBirthDate = normalizeBirthDate(DEFAULT_SUPER_ADMIN.birthDate);
+
   await pool.query(
     `
     INSERT INTO users (
@@ -579,7 +581,7 @@ async function ensureDefaultSuperAdmin() {
       DEFAULT_SUPER_ADMIN.lastName,
       DEFAULT_SUPER_ADMIN.firstName,
       DEFAULT_SUPER_ADMIN.middleName,
-      DEFAULT_SUPER_ADMIN.birthDate,
+      normalizedBirthDate,
       DEFAULT_SUPER_ADMIN.groupNumber,
       login,
       password,
@@ -589,6 +591,29 @@ async function ensureDefaultSuperAdmin() {
   );
 
   console.info(`Default super admin created with login "${login}".`);
+}
+
+function normalizeBirthDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  const dotFormat = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (dotFormat) {
+    const [, day, month, year] = dotFormat;
+    return `${year}-${month}-${day}`;
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = parsed.getUTCFullYear();
+    const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  console.warn(`Invalid birth date format "${raw}", skipping value.`);
+  return null;
 }
 
 async function ensureSeedData() {
