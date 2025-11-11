@@ -2,7 +2,7 @@
   "name": "mini-app",
   "version": "1.0.0",
   "scripts": {
-    "start": "node server.js"
+    "start": "node api/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

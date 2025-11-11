@@ -1,5 +1,6 @@
 require("dotenv").config();
 require("dotenv").config();
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
@@ -261,24 +262,43 @@ app.delete(
   })
 );
 
-const staticDir = __dirname;
+const staticDir = path.join(__dirname, "..");
 app.use(express.static(staticDir));
+
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+  res.sendFile(path.join(staticDir, "index.html"));
+});
 
 app.use((err, _req, res, _next) => {
   console.error("Unhandled server error", err);
   res.status(500).json({ message: "Unexpected server error" });
 });
+const serverReady = initializeDatabase().catch((err) => {
+  console.error("Failed to initialize database", err);
+  throw err;
+});
 
-initializeDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server ready at http://localhost:${PORT}`);
+if (require.main === module) {
+  serverReady
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server ready at http://localhost:${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error("Failed to start server", err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error("Failed to initialize database", err);
-    process.exit(1);
-  });
+} else {
+  module.exports = async (req, res) => {
+    await serverReady;
+    return app(req, res);
+  };
+}
 
 function rowToTask(row) {
   return parsePayload(row, "task");
