@@ -41,8 +41,10 @@ const POOL_IDLE_TIMEOUT = Math.max(
 );
 const POOL_CONNECTION_TIMEOUT = Math.max(
   1000,
-  Number(process.env.DB_POOL_CONNECTION_TIMEOUT || process.env.PG_CONNECTION_TIMEOUT || 5000)
+  Number(process.env.DB_POOL_CONNECTION_TIMEOUT || process.env.PG_CONNECTION_TIMEOUT || 15000)
 );
+const DB_INIT_MAX_RETRIES = Math.max(1, Number(process.env.DB_INIT_MAX_RETRIES || 5));
+const DB_INIT_RETRY_DELAY = Math.max(250, Number(process.env.DB_INIT_RETRY_DELAY || 1500));
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -51,6 +53,8 @@ const pool = new Pool({
   idleTimeoutMillis: POOL_IDLE_TIMEOUT,
   connectionTimeoutMillis: POOL_CONNECTION_TIMEOUT,
   allowExitOnIdle: true,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 const app = express();
@@ -504,28 +508,40 @@ function normalizeCollection(items, mapper) {
     .filter(Boolean);
 }
 
-async function initializeDatabase() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      payload JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    )
-  `);
+async function initializeDatabase(attempt = 1) {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      )
+    `);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS features (
-      id TEXT PRIMARY KEY,
-      payload JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    )
-  `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS features (
+        id TEXT PRIMARY KEY,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      )
+    `);
 
-  await ensureUsersTable();
-  await ensureDefaultSuperAdmin();
-  await ensureSeedData();
+    await ensureUsersTable();
+    await ensureDefaultSuperAdmin();
+    await ensureSeedData();
+  } catch (error) {
+    if (isTransientConnectionError(error) && attempt < DB_INIT_MAX_RETRIES) {
+      const delay = DB_INIT_RETRY_DELAY * attempt;
+      console.warn(
+        `Database init attempt ${attempt} failed (${error.message}). Retrying in ${delay}ms...`
+      );
+      await sleep(delay);
+      return initializeDatabase(attempt + 1);
+    }
+    throw error;
+  }
 }
 
 async function ensureUsersTable() {
@@ -637,6 +653,30 @@ function normalizeBirthDate(value) {
   }
   console.warn(`Invalid birth date format "${raw}", skipping value.`);
   return null;
+}
+
+function isTransientConnectionError(error) {
+  if (!error) return false;
+  const code = error.code;
+  const message = String(error.message || "").toLowerCase();
+  const transientCodes = new Set(["57P01", "57P02", "57P03", "53300", "53400", "08006", "08001"]);
+  if (code && transientCodes.has(code)) {
+    return true;
+  }
+  if (
+    message.includes("connection terminated") ||
+    message.includes("connection timeout") ||
+    message.includes("terminating connection") ||
+    message.includes("remaining connection slots") ||
+    message.includes("connection refused")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function ensureSeedData() {
