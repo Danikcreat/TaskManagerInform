@@ -254,14 +254,16 @@
             <td>${escapeHtml(user.birthDate || "—")}</td>
             <td>${escapeHtml(user.login || "—")}</td>
             <td class="team-table__password">
-              <span>${passwordValue}</span>
-              ${
-                canSeePassword && user.password
-                  ? `<button class="ghost-btn ghost-btn--inline" type="button" data-action="toggle-password" data-user-id="${user.id}">
-                      ${showPassword ? "Скрыть" : "Показать"}
-                    </button>`
-                  : ""
-              }
+              <div class="team-table__password-content">
+                <span>${passwordValue}</span>
+                ${
+                  canSeePassword && user.password
+                    ? `<button class="ghost-btn ghost-btn--inline" type="button" data-action="toggle-password" data-user-id="${user.id}">
+                        ${showPassword ? "Скрыть" : "Показать"}
+                      </button>`
+                    : ""
+                }
+              </div>
             </td>
             <td>${escapeHtml(user.position || "—")}</td>
             <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
@@ -407,6 +409,20 @@
             <label>Логин*</label>
             <input name="login" required value="${escapeHtmlInput(user?.login)}" />
           </div>
+          <div class="form-group">
+            <label>Роль*</label>
+            <select name="role" required>
+              ${assignableRoles
+                .map(
+                  (role) => `
+                    <option value="${role}" ${role === user?.role ? "selected" : ""}>
+                      ${ROLE_LABELS[role] || role}
+                    </option>
+                  `
+                )
+                .join("")}
+            </select>
+          </div>
           ${
             isEdit
               ? ""
@@ -422,20 +438,6 @@
           <div class="form-group">
             <label>Должность</label>
             <input name="position" value="${escapeHtmlInput(user?.position)}" />
-          </div>
-          <div class="form-group">
-            <label>Роль*</label>
-            <select name="role" required>
-              ${assignableRoles
-                .map(
-                  (role) => `
-                    <option value="${role}" ${role === user?.role ? "selected" : ""}>
-                      ${ROLE_LABELS[role] || role}
-                    </option>
-                  `
-                )
-                .join("")}
-            </select>
           </div>
           <p class="form-error" data-role="form-error"></p>
           <div class="modal-card__footer">

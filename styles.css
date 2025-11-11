@@ -948,9 +948,14 @@ body {
 }
 
 .team-table__password {
+  vertical-align: middle;
+}
+
+.team-table__password-content {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 100%;
 }
 
 .team-table__actions {
