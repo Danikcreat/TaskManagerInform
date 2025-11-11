@@ -535,9 +535,7 @@ async function ensureUsersTable() {
       last_name TEXT NOT NULL,
       first_name TEXT NOT NULL,
       middle_name TEXT,
-      birth_date TEXT CHECK (
-        birth_date IS NULL OR birth_date ~ '^\\\\d{4}-\\\\d{2}-\\\\d{2}$'
-      ),
+      birth_date TEXT,
       group_number TEXT,
       login TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
@@ -547,12 +545,26 @@ async function ensureUsersTable() {
   `);
 
   await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_birth_date_check");
+
+  await pool.query(`
+    UPDATE users
+    SET birth_date = to_char(to_date(birth_date, 'DD.MM.YYYY'), 'YYYY-MM-DD')
+    WHERE birth_date ~ '^[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}$'
+  `);
+
+  await pool.query(`
+    UPDATE users
+    SET birth_date = NULL
+    WHERE birth_date IS NOT NULL
+      AND birth_date !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  `);
+
   await pool.query(
     `
     ALTER TABLE users
     ADD CONSTRAINT users_birth_date_check
     CHECK (
-      birth_date IS NULL OR birth_date ~ '^\\\\d{4}-\\\\d{2}-\\\\d{2}$'
+      birth_date IS NULL OR birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
     )
   `
   );
