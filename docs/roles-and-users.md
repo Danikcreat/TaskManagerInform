@@ -29,6 +29,7 @@ SQLite helper script: `sql/create_users_table.sql`.
 ## Default Super Admin Seed
 The Express API (PostgreSQL/Supabase) now creates the `users` table and, if configured, inserts a default super admin. Define the following variables in `.env` before the first launch:
 
+- `JWT_SECRET` — обязательный секрет для подписи JWT-токенов (выберите длинную случайную строку).
 - `DEFAULT_SUPER_ADMIN_LOGIN` (required for seeding)
 - `DEFAULT_SUPER_ADMIN_PASSWORD` (required for seeding)
 - `DEFAULT_SUPER_ADMIN_FIRST_NAME` (optional, default `Super`)
@@ -39,3 +40,9 @@ The Express API (PostgreSQL/Supabase) now creates the `users` table and, if conf
 - `DEFAULT_SUPER_ADMIN_POSITION` (optional, default `Super Administrator`)
 
 `api/server.js` calls `ensureDefaultSuperAdmin()` during startup: if the login already exists, nothing happens; if login or password is missing, a warning is printed and the seed step is skipped.
+
+## Auth Flow Overview
+- `POST /api/auth/login` — принимает `login` и `password`, сверяет с таблицей `users`, возвращает `token` (JWT) и публичные данные пользователя.
+- `GET /api/auth/me` — требует заголовок `Authorization: Bearer <token>`, возвращает свежий профиль пользователя.
+- Фронтенд (`app.js`) хранит токен и профиль в `localStorage`, показывает форму входа (`index.html`) и не загружает задачи, пока пользователь не авторизован.
+- Кнопка «Выйти» очищает локальное состояние. Позже можно навесить middleware `authenticate` на любые API-роуты, когда понадобятся ограничения доступа.

@@ -1,16 +1,10 @@
 (() => {
   const STORAGE_KEYS = {
     user: "inform_user_v1",
+    token: "inform_token_v1",
   };
 
   const API_BASE_URL = globalThis.APP_API_BASE_URL || "/api";
-
-  const DEFAULT_USER = {
-    id: "admin",
-    name: "Даник",
-    login: "danik",
-    role: "Администратор",
-  };
 
   const PRIORITY_META = {
     low: {
@@ -69,6 +63,12 @@
     sort: "closest",
   };
 
+  let appShell = null;
+  let authView = null;
+  let loginForm = null;
+  let authErrorNode = null;
+  let authSubmitBtn = null;
+  let sidebarLogoutBtn = null;
   let tasksRoot = null;
   let userChip = null;
   let modalRoot = null;
@@ -77,6 +77,8 @@
 
   let allTasks = [];
   let currentUser = null;
+  let authToken = null;
+  let tasksListenersBound = false;
   let isLoadingTasks = true;
   let tasksError = null;
   let hashListenerBound = false;
@@ -89,6 +91,12 @@
   }
 
   function init() {
+    appShell = document.getElementById("app");
+    authView = document.getElementById("authView");
+    loginForm = document.getElementById("loginForm");
+    authErrorNode = document.getElementById("authError");
+    authSubmitBtn = loginForm?.querySelector("button[type='submit']") || null;
+    sidebarLogoutBtn = document.querySelector(".sidebar__logout");
     tasksRoot = document.getElementById("tasksRoot");
     userChip = document.getElementById("userChip");
     modalRoot = document.getElementById("modalRoot");
@@ -98,13 +106,182 @@
       document.body.appendChild(modalRoot);
     }
 
-    currentUser = ensureUserProfile();
+    bindAuthForm();
+    bindSidebarLogout();
+    restoreSession();
+  }
+
+  function bindAuthForm() {
+    if (!loginForm) return;
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(loginForm);
+      const login = String(formData.get("login") || "").trim();
+      const password = String(formData.get("password") || "");
+      if (!login || !password) {
+        setAuthError("Заполните логин и пароль.");
+        return;
+      }
+      setAuthPendingState(true);
+      setAuthError("");
+      try {
+        const payload = await requestJson("/auth/login", {
+          method: "POST",
+          body: { login, password },
+        });
+        persistAuthToken(payload.token);
+        persistCurrentUser(payload.user);
+        loginForm.reset();
+        enterApp();
+      } catch (error) {
+        setAuthError(getErrorMessage(error, "Не удалось войти. Проверьте данные и попробуйте снова."));
+      } finally {
+        setAuthPendingState(false);
+      }
+    });
+  }
+
+  function bindSidebarLogout() {
+    if (!sidebarLogoutBtn) return;
+    sidebarLogoutBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      handleLogout();
+    });
+  }
+
+  async function restoreSession() {
+    const storedToken = safeStorageGet(STORAGE_KEYS.token);
+    if (storedToken) {
+      authToken = storedToken;
+    }
+
+    const storedUserRaw = safeStorageGet(STORAGE_KEYS.user);
+    if (storedUserRaw) {
+      try {
+        currentUser = JSON.parse(storedUserRaw);
+      } catch {
+        currentUser = null;
+      }
+    }
+
+    if (!authToken) {
+      showAuthView();
+      renderUserChip();
+      renderTasksView();
+      return;
+    }
+
+    try {
+      const me = await requestJson("/auth/me");
+      persistCurrentUser(me?.user ?? null);
+      enterApp();
+    } catch (error) {
+      console.warn("Не удалось восстановить сессию", error);
+      clearStoredSession();
+      authToken = null;
+      currentUser = null;
+      showAuthView();
+      renderUserChip();
+      renderTasksView();
+    }
+  }
+
+  function enterApp() {
+    if (!currentUser || !authToken) {
+      showAuthView();
+      return;
+    }
+    hideAuthView();
+    ensureAppBindings();
     renderUserChip();
     renderTasksView();
-    bindStaticListeners();
-    bindHashChangeListener();
     openTaskFromHash();
     loadTasksFromServer();
+  }
+
+  function ensureAppBindings() {
+    if (!tasksListenersBound) {
+      bindStaticListeners();
+      tasksListenersBound = true;
+    }
+    bindHashChangeListener();
+  }
+
+  function showAuthView() {
+    if (appShell) {
+      appShell.classList.add("app-shell--hidden");
+    }
+    if (authView) {
+      authView.hidden = false;
+      authView.classList.add("is-visible");
+    }
+    if (loginForm) {
+      loginForm.reset();
+    }
+    setAuthError("");
+    if (loginForm) {
+      const loginInput = loginForm.querySelector('input[name="login"]');
+      if (loginInput) {
+        loginInput.focus();
+      }
+    }
+  }
+
+  function hideAuthView() {
+    if (authView) {
+      authView.classList.remove("is-visible");
+      authView.hidden = true;
+    }
+    if (appShell) {
+      appShell.classList.remove("app-shell--hidden");
+    }
+    setAuthError("");
+  }
+
+  function setAuthError(message) {
+    if (!authErrorNode) return;
+    authErrorNode.textContent = message;
+  }
+
+  function setAuthPendingState(isPending) {
+    if (!authSubmitBtn) return;
+    authSubmitBtn.disabled = isPending;
+    authSubmitBtn.classList.toggle("is-loading", isPending);
+  }
+
+  function handleLogout() {
+    clearStoredSession();
+    authToken = null;
+    currentUser = null;
+    allTasks = [];
+    isLoadingTasks = false;
+    tasksError = null;
+    showAuthView();
+    renderUserChip();
+    renderTasksView();
+  }
+
+  function persistAuthToken(token) {
+    authToken = token;
+    if (token) {
+      safeStorageSet(STORAGE_KEYS.token, token);
+    } else {
+      safeStorageRemove(STORAGE_KEYS.token);
+    }
+  }
+
+  function persistCurrentUser(user) {
+    currentUser = user || null;
+    if (currentUser) {
+      safeStorageSet(STORAGE_KEYS.user, JSON.stringify(currentUser));
+    } else {
+      safeStorageRemove(STORAGE_KEYS.user);
+    }
+  }
+
+  function clearStoredSession() {
+    safeStorageRemove(STORAGE_KEYS.token);
+    safeStorageRemove(STORAGE_KEYS.user);
   }
 
   function bindStaticListeners() {
@@ -141,21 +318,13 @@
     });
   }
 
-  function ensureUserProfile() {
-    const raw = safeStorageGet(STORAGE_KEYS.user);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed) return parsed;
-      } catch {
-        /* ignore bad payload */
-      }
-    }
-    safeStorageSet(STORAGE_KEYS.user, JSON.stringify(DEFAULT_USER));
-    return DEFAULT_USER;
-  }
-
   async function loadTasksFromServer() {
+    if (!authToken) {
+      allTasks = [];
+      isLoadingTasks = false;
+      renderTasksView();
+      return;
+    }
     isLoadingTasks = true;
     tasksError = null;
     renderTasksView();
@@ -175,20 +344,40 @@
 
   function renderUserChip() {
     if (!userChip) return;
-    userChip.textContent = `${currentUser.role} • ${currentUser.login}`;
+    if (!currentUser) {
+      userChip.textContent = "Не авторизован";
+      return;
+    }
+    const roleLabel = getRoleLabel(currentUser.role);
+    const identity = currentUser.login || currentUser.displayName || "профиль";
+    userChip.textContent = `${roleLabel} • ${identity}`;
   }
 
   function renderTasksView() {
     if (!tasksRoot) return;
+    if (!currentUser) {
+      tasksRoot.innerHTML = `
+        <section class="panel panel--empty">
+          <div class="panel__header">
+            <div>
+              <h2 class="panel__title">Требуется вход</h2>
+              <p class="panel__subtitle">Авторизуйтесь, чтобы просматривать и управлять задачами.</p>
+            </div>
+          </div>
+        </section>
+      `;
+      return;
+    }
     const filteredTasks = getVisibleTasks();
     const responsibles = Array.from(new Set(allTasks.map((task) => task.responsible))).sort();
     const stats = summarizeTasks(allTasks);
+    const greetingName = getGreetingName();
 
     tasksRoot.innerHTML = `
       <section class="panel">
         <div class="panel__header">
           <div>
-            <h2 class="panel__title">Добрый день, ${escapeHtml(currentUser.name.split(" ")[0])}</h2>
+            <h2 class="panel__title">Добрый день, ${escapeHtml(greetingName)}</h2>
             <p class="panel__subtitle">
               Всего задач: ${allTasks.length}. В работе: ${stats.in_progress}. В ожидании: ${
       stats.pending
@@ -1024,6 +1213,9 @@
         ...(options.headers || {}),
       },
     };
+    if (authToken) {
+      config.headers.Authorization = `Bearer ${authToken}`;
+    }
     if (options.body !== undefined) {
       config.headers["Content-Type"] = "application/json";
       config.body =
@@ -1341,6 +1533,48 @@
     } catch {
       /* storage might be disabled; keep data in memory only */
     }
+  }
+
+  function safeStorageRemove(key) {
+    try {
+      globalThis.localStorage?.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function getRoleLabel(role) {
+    switch (role) {
+      case "super_admin":
+        return "Супер-админ";
+      case "admin":
+        return "Админ";
+      case "content_manager":
+        return "Контент-менеджер";
+      case "executor":
+        return "Исполнитель";
+      default:
+        return "Пользователь";
+    }
+  }
+
+  function getGreetingName() {
+    if (!currentUser) {
+      return "коллега";
+    }
+    if (currentUser.firstName) {
+      return currentUser.firstName;
+    }
+    if (currentUser.displayName) {
+      return currentUser.displayName.split(" ")[0];
+    }
+    if (currentUser.name) {
+      return currentUser.name.split(" ")[0];
+    }
+    if (currentUser.login) {
+      return currentUser.login;
+    }
+    return "коллега";
   }
 
   function escapeHtml(value = "") {

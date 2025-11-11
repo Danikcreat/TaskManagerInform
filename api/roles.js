@@ -25,7 +25,7 @@ const ROLE_PERMISSIONS = Object.freeze({
   },
   [USER_ROLES.CONTENT_MANAGER]: {
     canManageUsers: false,
-    canManageTasks: "create_assign",
+    canManageTasks: "all",
     canManageContentPlans: true,
     canManageRoadmap: false,
     notes: "Управляет контент-планами, создаёт задачи и назначает исполнителей.",

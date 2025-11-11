@@ -5,11 +5,24 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
+const jwt = require("jsonwebtoken");
 const { USER_ROLES } = require("./roles");
 
 const USER_ROLE_VALUES_SQL = Object.values(USER_ROLES)
   .map((role) => `'${role}'`)
   .join(", ");
+const USER_SELECT_COLUMNS = [
+  "id",
+  "last_name",
+  "first_name",
+  "middle_name",
+  "birth_date",
+  "group_number",
+  "login",
+  "password",
+  "position",
+  "role",
+].join(", ");
 
 const DEFAULT_SUPER_ADMIN = {
   login: process.env.DEFAULT_SUPER_ADMIN_LOGIN,
@@ -24,11 +37,17 @@ const DEFAULT_SUPER_ADMIN = {
 
 const PORT = process.env.PORT || 4000;
 const DATABASE_URL = process.env.DATABASE_URL;
+const JWT_SECRET = process.env.JWT_SECRET;
+const AUTH_TOKEN_TTL = process.env.JWT_EXPIRES_IN || "7d";
 
 if (!DATABASE_URL) {
   throw new Error(
     "DATABASE_URL environment variable is required. Provide your Supabase connection string."
   );
+}
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required for auth token signing.");
 }
 
 const POOL_MAX_CONNECTIONS = Math.max(
@@ -68,6 +87,59 @@ const asyncHandler = (handler) => (req, res, next) => {
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
 });
+
+app.post(
+  "/api/auth/login",
+  asyncHandler(async (req, res) => {
+    const login = normalizeLogin(req.body?.login);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!login || !password) {
+      res.status(400).json({ message: "Логин и пароль обязательны." });
+      return;
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT ${USER_SELECT_COLUMNS}
+      FROM users
+      WHERE login = $1
+      LIMIT 1
+    `,
+      [login]
+    );
+
+    const userRow = rows[0];
+    if (!userRow || userRow.password !== password) {
+      res.status(401).json({ message: "Неверный логин или пароль." });
+      return;
+    }
+
+    const user = mapDbUser(userRow);
+    res.json({ token: createAuthToken(user), user });
+  })
+);
+
+app.get(
+  "/api/auth/me",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query(
+      `
+      SELECT ${USER_SELECT_COLUMNS}
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `,
+      [req.auth?.sub]
+    );
+    const userRow = rows[0];
+    if (!userRow) {
+      res.status(404).json({ message: "Пользователь не найден." });
+      return;
+    }
+    res.json({ user: mapDbUser(userRow) });
+  })
+);
 
 app.get(
   "/api/tasks",
@@ -809,4 +881,66 @@ function createId() {
 function getSSLConfig(url) {
   if (!url) return undefined;
   return /localhost|127\.0\.0\.1/i.test(url) ? undefined : { rejectUnauthorized: false };
+}
+
+function mapDbUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    lastName: row.last_name,
+    firstName: row.first_name,
+    middleName: row.middle_name,
+    birthDate: row.birth_date,
+    groupNumber: row.group_number,
+    login: row.login,
+    position: row.position,
+    role: row.role,
+    displayName: formatDisplayName(row),
+  };
+}
+
+function formatDisplayName(row) {
+  return [row.first_name, row.middle_name, row.last_name]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function createAuthToken(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      role: user.role,
+      login: user.login,
+    },
+    JWT_SECRET,
+    { expiresIn: AUTH_TOKEN_TTL }
+  );
+}
+
+function authenticate(req, res, next) {
+  const token = extractToken(req);
+  if (!token) {
+    res.status(401).json({ message: "Требуется авторизация." });
+    return;
+  }
+  try {
+    req.auth = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ message: "Недействительный или истекший токен." });
+  }
+}
+
+function extractToken(req) {
+  const authHeader = req.headers?.authorization || "";
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  return null;
+}
+
+function normalizeLogin(value) {
+  return String(value || "").trim();
 }
