@@ -3,11 +3,12 @@
     votes: "inform_roadmap_votes",
     ideas: "inform_roadmap_ideas",
     features: "inform_roadmap_features",
-    adminMode: "inform_roadmap_admin_mode",
   };
 
+  const USER_STORAGE_KEY = "inform_user_v1";
+  const SUPER_ADMIN_ROLE = "super_admin";
+
   const API_BASE_URL = globalThis.APP_API_BASE_URL || "/api";
-  const ADMIN_PASSWORD = "admin";
 
   const STATUS_META = {
     in_progress: { label: "В работе", className: "status-chip status-in-progress", order: 0 },
@@ -21,13 +22,12 @@
   let featureState = [];
   let isLoadingFeatures = true;
   let featuresError = null;
-  let isAdmin = loadAdminMode();
+  let currentUser = loadStoredUser();
+  let isAdmin = canManageRoadmap(currentUser);
   let editingFeatureId = null;
 
   const roadmapList = document.getElementById("roadmapList");
-  const adminToggleBtn = document.getElementById("adminToggleBtn");
   const adminPanel = document.getElementById("adminPanel");
-  const adminLogoutBtn = document.getElementById("adminLogoutBtn");
   const featureForm = document.getElementById("featureForm");
   const adminFeatureList = document.getElementById("adminFeatureList");
   const featureIdInput = document.getElementById("featureId");
@@ -44,6 +44,7 @@
     renderFeatures();
     bindVotes();
     bindAdminControls();
+    bindAdminAccessWatcher();
     initFeatureStatusSelect();
     loadFeaturesFromServer();
   }
@@ -186,38 +187,7 @@
   }
 
   function bindAdminControls() {
-    if (adminToggleBtn) {
-      adminToggleBtn.addEventListener("click", () => {
-        if (isAdmin) {
-          isAdmin = false;
-          persistAdminMode();
-          resetFeatureEditor();
-          updateAdminUI();
-          return;
-        }
-        const password = prompt("Введите пароль администратора");
-        if (password && password.trim() === ADMIN_PASSWORD) {
-          isAdmin = true;
-          persistAdminMode();
-          updateAdminUI();
-        } else {
-          alert("Неверный пароль");
-        }
-      });
-    }
-
-    if (adminLogoutBtn) {
-      adminLogoutBtn.addEventListener("click", () => {
-        isAdmin = false;
-        persistAdminMode();
-        resetFeatureEditor();
-        updateAdminUI();
-      });
-    }
-
-
-
-        if (featureForm) {
+    if (featureForm) {
       featureForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const formData = new FormData(featureForm);
@@ -327,10 +297,27 @@
     updateAdminUI();
   }
 
-  function updateAdminUI() {
-    if (adminToggleBtn) {
-      adminToggleBtn.textContent = isAdmin ? "Выйти из админ-панели" : "Войти как админ";
+  function bindAdminAccessWatcher() {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    window.addEventListener("storage", (event) => {
+      if (event && event.key && event.key !== USER_STORAGE_KEY) return;
+      refreshAdminAccess();
+    });
+  }
+
+  function refreshAdminAccess() {
+    const nextUser = loadStoredUser();
+    const nextIsAdmin = canManageRoadmap(nextUser);
+    if (nextIsAdmin === isAdmin) return;
+    currentUser = nextUser;
+    isAdmin = nextIsAdmin;
+    if (!isAdmin) {
+      resetFeatureEditor();
     }
+    updateAdminUI();
+  }
+
+  function updateAdminUI() {
     if (adminPanel) {
       adminPanel.hidden = !isAdmin;
     }
@@ -675,24 +662,19 @@
     }
   }
 
-  
-
-  
-
-  function loadAdminMode() {
+  function loadStoredUser() {
     try {
-      return localStorage.getItem(STORAGE_KEYS.adminMode) === "true";
+      const raw = localStorage.getItem(USER_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return typeof parsed === "object" && parsed ? parsed : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
-  function persistAdminMode() {
-    try {
-      localStorage.setItem(STORAGE_KEYS.adminMode, String(isAdmin));
-    } catch {
-      /* ignore */
-    }
+  function canManageRoadmap(user) {
+    return Boolean(user && user.role === SUPER_ADMIN_ROLE);
   }
 
   async function loadFeaturesFromServer() {
