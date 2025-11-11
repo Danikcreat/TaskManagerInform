@@ -6,6 +6,7 @@
   };
 
   const USER_STORAGE_KEY = "inform_user_v1";
+  const TOKEN_STORAGE_KEY = "inform_token_v1";
   const SUPER_ADMIN_ROLE = "super_admin";
 
   const API_BASE_URL = globalThis.APP_API_BASE_URL || "/api";
@@ -22,8 +23,9 @@
   let featureState = [];
   let isLoadingFeatures = true;
   let featuresError = null;
+  let authToken = loadStoredToken();
   let currentUser = loadStoredUser();
-  let isAdmin = canManageRoadmap(currentUser);
+  let isAdmin = canManageRoadmap(currentUser, authToken);
   let editingFeatureId = null;
 
   const roadmapList = document.getElementById("roadmapList");
@@ -45,6 +47,7 @@
     bindVotes();
     bindAdminControls();
     bindAdminAccessWatcher();
+    ensureFreshUserProfile();
     initFeatureStatusSelect();
     loadFeaturesFromServer();
   }
@@ -300,21 +303,61 @@
   function bindAdminAccessWatcher() {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
     window.addEventListener("storage", (event) => {
-      if (event && event.key && event.key !== USER_STORAGE_KEY) return;
+      if (
+        event &&
+        event.key &&
+        event.key !== USER_STORAGE_KEY &&
+        event.key !== TOKEN_STORAGE_KEY
+      ) {
+        return;
+      }
       refreshAdminAccess();
     });
   }
 
   function refreshAdminAccess() {
     const nextUser = loadStoredUser();
-    const nextIsAdmin = canManageRoadmap(nextUser);
-    if (nextIsAdmin === isAdmin) return;
+    const nextToken = loadStoredToken();
+    const nextIsAdmin = canManageRoadmap(nextUser, nextToken);
     currentUser = nextUser;
-    isAdmin = nextIsAdmin;
-    if (!isAdmin) {
+    authToken = nextToken;
+    if (!nextIsAdmin) {
       resetFeatureEditor();
     }
-    updateAdminUI();
+    if (nextIsAdmin !== isAdmin) {
+      isAdmin = nextIsAdmin;
+      updateAdminUI();
+    } else if (!nextIsAdmin) {
+      updateAdminUI();
+    }
+  }
+
+  function ensureFreshUserProfile() {
+    authToken = loadStoredToken();
+    if (!authToken) {
+      clearStoredUser();
+      refreshAdminAccess();
+      return;
+    }
+    requestJson("/auth/me", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then((payload) => {
+        const user = payload?.user ?? null;
+        if (user) {
+          saveUserToStorage(user);
+        } else {
+          clearStoredUser();
+        }
+      })
+      .catch((error) => {
+        if (isUnauthorizedError(error)) {
+          clearStoredSession();
+        } else {
+          console.warn("Не удалось обновить сведения о пользователе", error);
+        }
+      })
+      .finally(() => refreshAdminAccess());
   }
 
   function updateAdminUI() {
@@ -673,8 +716,45 @@
     }
   }
 
-  function canManageRoadmap(user) {
-    return Boolean(user && user.role === SUPER_ADMIN_ROLE);
+  function saveUserToStorage(user) {
+    try {
+      if (user) {
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      } else {
+        localStorage.removeItem(USER_STORAGE_KEY);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearStoredUser() {
+    saveUserToStorage(null);
+  }
+
+  function loadStoredToken() {
+    try {
+      return localStorage.getItem(TOKEN_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearStoredToken() {
+    try {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearStoredSession() {
+    clearStoredToken();
+    clearStoredUser();
+  }
+
+  function canManageRoadmap(user, token) {
+    return Boolean(token && user && user.role === SUPER_ADMIN_ROLE);
   }
 
   async function loadFeaturesFromServer() {
@@ -759,7 +839,9 @@
       const message =
         (payload && (payload.message || payload.error)) ||
         `Запрос завершился с ошибкой (${response.status})`;
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
     }
     return payload;
   }
@@ -792,6 +874,10 @@
 
   function getErrorMessage(error, fallback) {
     return enhanceError(error, fallback).message;
+  }
+
+  function isUnauthorizedError(error) {
+    return Boolean(error && typeof error === "object" && "status" in error && error.status === 401);
   }
 
   function showErrorMessage(message) {
