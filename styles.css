@@ -680,6 +680,17 @@ body {
   gap: 12px;
 }
 
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.form-row .form-group {
+  flex: 1;
+  min-width: 220px;
+}
+
 .form-group--full {
   grid-column: 1 / -1;
 }

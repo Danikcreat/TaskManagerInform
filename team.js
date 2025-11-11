@@ -409,19 +409,25 @@
             <label>Логин*</label>
             <input name="login" required value="${escapeHtmlInput(user?.login)}" />
           </div>
-          <div class="form-group">
-            <label>Роль*</label>
-            <select name="role" required>
-              ${assignableRoles
-                .map(
-                  (role) => `
-                    <option value="${role}" ${role === user?.role ? "selected" : ""}>
-                      ${ROLE_LABELS[role] || role}
-                    </option>
-                  `
-                )
-                .join("")}
-            </select>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Роль*</label>
+              <select name="role" required>
+                ${assignableRoles
+                  .map(
+                    (role) => `
+                      <option value="${role}" ${role === user?.role ? "selected" : ""}>
+                        ${ROLE_LABELS[role] || role}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Должность</label>
+              <input name="position" value="${escapeHtmlInput(user?.position)}" />
+            </div>
           </div>
           ${
             isEdit
@@ -435,10 +441,6 @@
             </div>
           </div>`
           }
-          <div class="form-group">
-            <label>Должность</label>
-            <input name="position" value="${escapeHtmlInput(user?.position)}" />
-          </div>
           <p class="form-error" data-role="form-error"></p>
           <div class="modal-card__footer">
             <button class="ghost-btn" type="button" data-role="cancel-modal">Отмена</button>
