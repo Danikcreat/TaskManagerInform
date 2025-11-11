@@ -142,6 +142,239 @@ app.get(
 );
 
 app.get(
+  "/api/users",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const actorRole = req.auth?.role;
+    const includePasswords = canViewPasswords(actorRole);
+    const { rows } = await pool.query(
+      `
+      SELECT ${USER_SELECT_COLUMNS}
+      FROM users
+      ORDER BY last_name ASC, first_name ASC, id ASC
+    `
+    );
+    const users = rows.map((row) => {
+      const user = mapDbUser(row);
+      if (includePasswords) {
+        user.password = row.password;
+      }
+      return user;
+    });
+    res.json({ users });
+  })
+);
+
+app.post(
+  "/api/users",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const actorRole = req.auth?.role;
+    if (!canManageAnyUsers(actorRole)) {
+      res.status(403).json({ message: "Недостаточно прав для управления пользователями" });
+      return;
+    }
+    const { value, error } = normalizeUserPayload(req.body || {}, {
+      partial: false,
+      allowedRoles: getAssignableRoles(actorRole),
+      requirePassword: true,
+    });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    try {
+      const { rows } = await pool.query(
+        `
+        INSERT INTO users (
+          last_name,
+          first_name,
+          middle_name,
+          birth_date,
+          group_number,
+          login,
+          password,
+          position,
+          role
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING ${USER_SELECT_COLUMNS}
+      `,
+        [
+          value.lastName,
+          value.firstName,
+          value.middleName ?? null,
+          value.birthDate ?? null,
+          value.groupNumber ?? null,
+          value.login,
+          value.password,
+          value.position ?? null,
+          value.role,
+        ]
+      );
+      const createdRow = rows[0];
+      const user = mapDbUser(createdRow);
+      if (canViewPasswords(actorRole)) {
+        user.password = createdRow.password;
+      }
+      res.status(201).json({ user });
+    } catch (err) {
+      if (String(err?.code) === "23505" || String(err?.message).includes("duplicate")) {
+        res.status(409).json({ message: "Пользователь с таким логином уже существует" });
+        return;
+      }
+      console.error("Failed to create user", err);
+      res.status(500).json({ message: "Не удалось создать пользователя" });
+    }
+  })
+);
+
+app.put(
+  "/api/users/:id",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const actorRole = req.auth?.role;
+    if (!canManageAnyUsers(actorRole)) {
+      res.status(403).json({ message: "Недостаточно прав для управления пользователями" });
+      return;
+    }
+    const targetRow = await findUserById(req.params.id);
+    if (!targetRow) {
+      res.status(404).json({ message: "Пользователь не найден" });
+      return;
+    }
+    if (!canManageSpecificUser(actorRole, targetRow.role)) {
+      res.status(403).json({ message: "Нельзя изменять этого пользователя" });
+      return;
+    }
+    const { value, error } = normalizeUserPayload(req.body || {}, {
+      partial: true,
+      allowedRoles: getAssignableRoles(actorRole),
+      requirePassword: false,
+    });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    const fields = [];
+    const params = [];
+    let paramIndex = 1;
+    const pushField = (column, key) => {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        fields.push(`${column} = $${paramIndex}`);
+        params.push(value[key]);
+        paramIndex += 1;
+      }
+    };
+    pushField("last_name", "lastName");
+    pushField("first_name", "firstName");
+    pushField("middle_name", "middleName");
+    pushField("birth_date", "birthDate");
+    pushField("group_number", "groupNumber");
+    pushField("login", "login");
+    pushField("position", "position");
+    pushField("role", "role");
+    if (!fields.length) {
+      res.status(400).json({ message: "Нет изменений для сохранения" });
+      return;
+    }
+    const query = `
+      UPDATE users
+      SET ${fields.join(", ")}, updated_at = NOW()
+      WHERE id = $${paramIndex}
+      RETURNING ${USER_SELECT_COLUMNS}
+    `;
+    params.push(targetRow.id);
+    try {
+      const { rows } = await pool.query(query, params);
+      const updatedRow = rows[0];
+      const user = mapDbUser(updatedRow);
+      if (canViewPasswords(actorRole)) {
+        user.password = updatedRow.password;
+      }
+      res.json({ user });
+    } catch (err) {
+      if (String(err?.code) === "23505" || String(err?.message).includes("duplicate")) {
+        res.status(409).json({ message: "Пользователь с таким логином уже существует" });
+        return;
+      }
+      console.error("Failed to update user", err);
+      res.status(500).json({ message: "Не удалось обновить пользователя" });
+    }
+  })
+);
+
+app.delete(
+  "/api/users/:id",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const actorRole = req.auth?.role;
+    if (!canManageAnyUsers(actorRole)) {
+      res.status(403).json({ message: "Недостаточно прав для управления пользователями" });
+      return;
+    }
+    const targetRow = await findUserById(req.params.id);
+    if (!targetRow) {
+      res.status(404).json({ message: "Пользователь не найден" });
+      return;
+    }
+    if (!canManageSpecificUser(actorRole, targetRow.role)) {
+      res.status(403).json({ message: "Нельзя удалять этого пользователя" });
+      return;
+    }
+    try {
+      await pool.query("DELETE FROM users WHERE id = $1", [targetRow.id]);
+      res.status(204).send();
+    } catch (err) {
+      console.error("Failed to delete user", err);
+      res.status(500).json({ message: "Не удалось удалить пользователя" });
+    }
+  })
+);
+
+app.post(
+  "/api/users/:id/reset-password",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const actorRole = req.auth?.role;
+    if (!canManageAnyUsers(actorRole)) {
+      res.status(403).json({ message: "Недостаточно прав для управления пользователями" });
+      return;
+    }
+    const targetRow = await findUserById(req.params.id);
+    if (!targetRow) {
+      res.status(404).json({ message: "Пользователь не найден" });
+      return;
+    }
+    if (!canManageSpecificUser(actorRole, targetRow.role)) {
+      res.status(403).json({ message: "Нельзя сбросить пароль этому пользователю" });
+      return;
+    }
+    const newPassword = generatePassword(8);
+    try {
+      const { rows } = await pool.query(
+        `
+        UPDATE users
+        SET password = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING ${USER_SELECT_COLUMNS}
+      `,
+        [newPassword, targetRow.id]
+      );
+      const updatedRow = rows[0];
+      const user = mapDbUser(updatedRow);
+      if (canViewPasswords(actorRole)) {
+        user.password = updatedRow.password;
+      }
+      res.json({ user, password: newPassword });
+    } catch (err) {
+      console.error("Failed to reset password", err);
+      res.status(500).json({ message: "Не удалось сбросить пароль пользователя" });
+    }
+  })
+);
+
+app.get(
   "/api/tasks",
   asyncHandler(async (_req, res) => {
     const { rows } = await pool.query("SELECT payload FROM tasks ORDER BY updated_at DESC");
@@ -943,4 +1176,140 @@ function extractToken(req) {
 
 function normalizeLogin(value) {
   return String(value || "").trim();
+}
+
+function canManageAnyUsers(role) {
+  return role === USER_ROLES.SUPER_ADMIN || role === USER_ROLES.ADMIN;
+}
+
+function canViewPasswords(role) {
+  return canManageAnyUsers(role);
+}
+
+function canManageSpecificUser(actorRole, targetRole) {
+  if (actorRole === USER_ROLES.SUPER_ADMIN) return true;
+  if (actorRole === USER_ROLES.ADMIN) {
+    return (
+      targetRole === USER_ROLES.CONTENT_MANAGER || targetRole === USER_ROLES.EXECUTOR
+    );
+  }
+  return false;
+}
+
+function getAssignableRoles(role) {
+  if (role === USER_ROLES.SUPER_ADMIN) {
+    return Object.values(USER_ROLES);
+  }
+  if (role === USER_ROLES.ADMIN) {
+    return [USER_ROLES.CONTENT_MANAGER, USER_ROLES.EXECUTOR];
+  }
+  return [];
+}
+
+async function findUserById(id) {
+  if (!id) return null;
+  const { rows } = await pool.query(
+    `
+    SELECT ${USER_SELECT_COLUMNS}
+    FROM users
+    WHERE id = $1
+    LIMIT 1
+  `,
+    [id]
+  );
+  return rows[0] || null;
+}
+
+function normalizeUserPayload(payload, options = {}) {
+  const { partial = false, allowedRoles = Object.values(USER_ROLES), requirePassword = false } =
+    options;
+  const source = payload || {};
+  const result = {};
+
+  if (!partial || source.lastName !== undefined) {
+    const value = String(source.lastName || "").trim();
+    if (!value) {
+      return { error: "Фамилия обязательна" };
+    }
+    result.lastName = value;
+  }
+
+  if (!partial || source.firstName !== undefined) {
+    const value = String(source.firstName || "").trim();
+    if (!value) {
+      return { error: "Имя обязательно" };
+    }
+    result.firstName = value;
+  }
+
+  if (source.middleName !== undefined) {
+    const value = String(source.middleName || "").trim();
+    result.middleName = value || null;
+  }
+
+  if (source.groupNumber !== undefined) {
+    const value = String(source.groupNumber || "").trim();
+    result.groupNumber = value || null;
+  }
+
+  if (source.birthDate !== undefined) {
+    const value = String(source.birthDate || "").trim();
+    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return { error: "Дата рождения должна быть в формате ГГГГ-ММ-ДД" };
+    }
+    result.birthDate = value || null;
+  }
+
+  if (!partial || source.login !== undefined) {
+    const value = String(source.login || "").trim();
+    if (!value) {
+      return { error: "Логин обязателен" };
+    }
+    result.login = value;
+  } else if (source.login === null) {
+    return { error: "Логин обязателен" };
+  }
+
+  if (source.position !== undefined) {
+    const value = String(source.position || "").trim();
+    result.position = value || null;
+  }
+
+  if (!partial || source.role !== undefined) {
+    const value = String(source.role || "").trim();
+    if (!value) {
+      return { error: "Роль обязательна" };
+    }
+    if (!allowedRoles.includes(value)) {
+      return { error: "Эта роль недоступна для назначения" };
+    }
+    result.role = value;
+  }
+
+  if (requirePassword || source.password !== undefined) {
+    const value = String(source.password || "").trim();
+    if (!value) {
+      return { error: "Пароль обязателен" };
+    }
+    if (value.length < 6) {
+      return { error: "Пароль должен содержать минимум 6 символов" };
+    }
+    result.password = value;
+  }
+
+  if (partial && Object.keys(result).length === 0) {
+    return { error: "Нет данных для обновления" };
+  }
+
+  return { value: result };
+}
+
+function generatePassword(length = 8) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let password = "";
+  for (let i = 0; i < length; i += 1) {
+    const index = Math.floor(Math.random() * alphabet.length);
+    password += alphabet[index];
+  }
+  return password;
 }

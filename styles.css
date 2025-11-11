@@ -205,6 +205,12 @@ body {
   margin: 0;
 }
 
+.workspace__subtitle {
+  margin: 8px 0 0;
+  color: var(--muted);
+  max-width: 520px;
+}
+
 .user-chip {
   padding: 14px 20px;
   background: var(--surface);
@@ -574,6 +580,10 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+.empty-state--error {
+  border: 1px solid rgba(239, 83, 80, 0.3);
+}
+
 .empty-state h3 {
   margin: 0 0 12px;
   font-size: 24px;
@@ -663,6 +673,13 @@ body {
   gap: 6px;
 }
 
+.form-group--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .form-group--full {
   grid-column: 1 / -1;
 }
@@ -689,6 +706,22 @@ body {
 .form-group textarea {
   resize: vertical;
   min-height: 90px;
+}
+
+.form-group__password {
+  display: flex;
+  gap: 10px;
+}
+
+.form-group__password input {
+  flex: 1;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 14px;
+  margin: 4px 0 0;
+  min-height: 18px;
 }
 
 .subtasks-list {
@@ -772,6 +805,11 @@ body {
   cursor: pointer;
 }
 
+.ghost-btn--inline {
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
 .ghost-btn--danger {
   color: var(--danger);
   border: 1px solid rgba(239, 83, 80, 0.4);
@@ -782,6 +820,25 @@ body {
 .ghost-btn--danger:focus-visible {
   background: var(--danger);
   color: #fff;
+}
+
+.icon-btn {
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: var(--radius-md);
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+  background: rgba(15, 23, 42, 0.15);
 }
 
 .filters-row {
@@ -845,6 +902,160 @@ body {
   letter-spacing: 0.1em;
   color: var(--muted);
   margin: 0;
+}
+
+.team-header {
+  align-items: flex-start;
+}
+
+.team-panel {
+  gap: 0;
+}
+
+.team-table-root .empty-state {
+  box-shadow: none;
+  border: 1px dashed rgba(15, 23, 42, 0.15);
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 960px;
+}
+
+.team-table--compact {
+  min-width: 480px;
+}
+
+.team-table th,
+.team-table td {
+  text-align: left;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.team-table th {
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.team-table__password {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-table__actions {
+  width: 70px;
+}
+
+.team-action {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.team-action__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  z-index: 50;
+}
+
+.team-action__item {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.team-action__item:hover,
+.team-action__item:focus-visible {
+  background: var(--surface-alt);
+}
+
+.team-action__item--danger {
+  color: var(--danger);
+}
+
+.team-action__item--danger:hover,
+.team-action__item--danger:focus-visible {
+  background: rgba(239, 83, 80, 0.1);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.modal-overlay.is-visible {
+  opacity: 1;
+}
+
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.modal-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.modal-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.modal-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.modal-form .form-group {
+  margin: 0;
+}
+
+.modal-form .form-error,
+.modal-form .modal-card__footer {
+  grid-column: 1 / -1;
 }
 
 .summary-card__value {
