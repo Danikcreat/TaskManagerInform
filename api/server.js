@@ -545,6 +545,17 @@ async function ensureUsersTable() {
       role TEXT NOT NULL CHECK (role IN (${USER_ROLE_VALUES_SQL}))
     )
   `);
+
+  await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_birth_date_check");
+  await pool.query(
+    `
+    ALTER TABLE users
+    ADD CONSTRAINT users_birth_date_check
+    CHECK (
+      birth_date IS NULL OR birth_date ~ '^\\\\d{4}-\\\\d{2}-\\\\d{2}$'
+    )
+  `
+  );
 }
 
 async function ensureDefaultSuperAdmin() {
