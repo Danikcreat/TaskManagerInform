@@ -238,9 +238,12 @@
     const rowsHtml = usersState
       .map((user) => {
         const canManage = canManageRole(user.role);
-        const showPassword = passwordVisibility.has(String(user.id));
+        const canSeePassword = canViewUserPassword(user);
+        const showPassword = canSeePassword && passwordVisibility.has(String(user.id));
         const passwordValue =
-          showPassword && user.password ? escapeHtml(user.password) : "••••••";
+          canSeePassword && showPassword && user.password
+            ? escapeHtml(user.password)
+            : "••••••";
         return `
           <tr>
             <td>${escapeHtml(String(user.id))}</td>
@@ -253,7 +256,7 @@
             <td class="team-table__password">
               <span>${passwordValue}</span>
               ${
-                user.password
+                canSeePassword && user.password
                   ? `<button class="ghost-btn ghost-btn--inline" type="button" data-action="toggle-password" data-user-id="${user.id}">
                       ${showPassword ? "Скрыть" : "Показать"}
                     </button>`
@@ -635,6 +638,15 @@
     if (currentUser.role === "super_admin") return true;
     if (currentUser.role === "admin") {
       return targetRole === "content_manager" || targetRole === "executor";
+    }
+    return false;
+  }
+
+  function canViewUserPassword(user) {
+    if (!currentUser) return false;
+    if (currentUser.role === "super_admin") return true;
+    if (currentUser.role === "admin") {
+      return user.role !== "super_admin";
     }
     return false;
   }
