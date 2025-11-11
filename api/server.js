@@ -5,6 +5,22 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
+const { USER_ROLES } = require("./roles");
+
+const USER_ROLE_VALUES_SQL = Object.values(USER_ROLES)
+  .map((role) => `'${role}'`)
+  .join(", ");
+
+const DEFAULT_SUPER_ADMIN = {
+  login: process.env.DEFAULT_SUPER_ADMIN_LOGIN,
+  password: process.env.DEFAULT_SUPER_ADMIN_PASSWORD,
+  firstName: process.env.DEFAULT_SUPER_ADMIN_FIRST_NAME || "Super",
+  lastName: process.env.DEFAULT_SUPER_ADMIN_LAST_NAME || "Admin",
+  middleName: process.env.DEFAULT_SUPER_ADMIN_MIDDLE_NAME || null,
+  birthDate: process.env.DEFAULT_SUPER_ADMIN_BIRTH_DATE || null,
+  groupNumber: process.env.DEFAULT_SUPER_ADMIN_GROUP_NUMBER || null,
+  position: process.env.DEFAULT_SUPER_ADMIN_POSITION || "Super Administrator",
+};
 
 const PORT = process.env.PORT || 4000;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -15,9 +31,26 @@ if (!DATABASE_URL) {
   );
 }
 
+const POOL_MAX_CONNECTIONS = Math.max(
+  1,
+  Number(process.env.DB_POOL_MAX || process.env.PG_POOL_MAX || 1)
+);
+const POOL_IDLE_TIMEOUT = Math.max(
+  1000,
+  Number(process.env.DB_POOL_IDLE_TIMEOUT || 5000)
+);
+const POOL_CONNECTION_TIMEOUT = Math.max(
+  1000,
+  Number(process.env.DB_POOL_CONNECTION_TIMEOUT || process.env.PG_CONNECTION_TIMEOUT || 5000)
+);
+
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: getSSLConfig(DATABASE_URL),
+  max: POOL_MAX_CONNECTIONS,
+  idleTimeoutMillis: POOL_IDLE_TIMEOUT,
+  connectionTimeoutMillis: POOL_CONNECTION_TIMEOUT,
+  allowExitOnIdle: true,
 });
 
 const app = express();
@@ -490,7 +523,72 @@ async function initializeDatabase() {
     )
   `);
 
+  await ensureUsersTable();
+  await ensureDefaultSuperAdmin();
   await ensureSeedData();
+}
+
+async function ensureUsersTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id BIGSERIAL PRIMARY KEY,
+      last_name TEXT NOT NULL,
+      first_name TEXT NOT NULL,
+      middle_name TEXT,
+      birth_date TEXT CHECK (
+        birth_date IS NULL OR birth_date ~ '^\\\\d{4}-\\\\d{2}-\\\\d{2}$'
+      ),
+      group_number TEXT,
+      login TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      position TEXT,
+      role TEXT NOT NULL CHECK (role IN (${USER_ROLE_VALUES_SQL}))
+    )
+  `);
+}
+
+async function ensureDefaultSuperAdmin() {
+  const { login, password } = DEFAULT_SUPER_ADMIN;
+  if (!login || !password) {
+    console.warn(
+      "DEFAULT_SUPER_ADMIN_LOGIN and DEFAULT_SUPER_ADMIN_PASSWORD must be set to seed the default super admin."
+    );
+    return;
+  }
+
+  const existing = await pool.query("SELECT id FROM users WHERE login = $1 LIMIT 1", [login]);
+  if (existing.rowCount > 0) {
+    return;
+  }
+
+  await pool.query(
+    `
+    INSERT INTO users (
+      last_name,
+      first_name,
+      middle_name,
+      birth_date,
+      group_number,
+      login,
+      password,
+      position,
+      role
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  `,
+    [
+      DEFAULT_SUPER_ADMIN.lastName,
+      DEFAULT_SUPER_ADMIN.firstName,
+      DEFAULT_SUPER_ADMIN.middleName,
+      DEFAULT_SUPER_ADMIN.birthDate,
+      DEFAULT_SUPER_ADMIN.groupNumber,
+      login,
+      password,
+      DEFAULT_SUPER_ADMIN.position,
+      USER_ROLES.SUPER_ADMIN,
+    ]
+  );
+
+  console.info(`Default super admin created with login "${login}".`);
 }
 
 async function ensureSeedData() {

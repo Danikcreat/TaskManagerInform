@@ -1033,10 +1033,9 @@
     const text = await response.text();
     const payload = text ? safeJsonParse(text) : null;
     if (!response.ok) {
-      const message =
-        (payload && (payload.message || payload.error)) ||
-        `Запрос завершился с ошибкой (${response.status})`;
-      throw new Error(message);
+      const serverMessage = payload && (payload.message ?? payload.error);
+      const fallbackMessage = `Запрос завершился с ошибкой (${response.status})`;
+      throw new Error(formatServerMessage(serverMessage, fallbackMessage));
     }
     return payload;
   }
@@ -1053,6 +1052,23 @@
     } catch {
       return null;
     }
+  }
+
+  function formatServerMessage(message, fallback) {
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+    if (message && typeof message === "object") {
+      try {
+        return JSON.stringify(message);
+      } catch {
+        /* ignore stringify failure */
+      }
+    }
+    if (message !== undefined && message !== null) {
+      return String(message);
+    }
+    return fallback;
   }
 
   function enhanceError(error, fallback) {
