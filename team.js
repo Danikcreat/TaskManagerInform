@@ -433,7 +433,7 @@
             isEdit
               ? ""
               : `
-          <div class="form-group form-group--inline">
+          <div class="form-group form-group--full">
             <label>Пароль*</label>
             <div class="form-group__password">
               <input name="password" required minlength="6" placeholder="Автогенерация" />

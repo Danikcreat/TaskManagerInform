@@ -684,6 +684,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+  grid-column: 1 / -1;
 }
 
 .form-row .form-group {
