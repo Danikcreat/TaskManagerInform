@@ -14,7 +14,7 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+            <aside class="sidebar">
         <div class="brand">
           <div class="brand__logo" aria-hidden="true">ФКП</div>
           <div class="brand__text">
@@ -23,30 +23,29 @@
           </div>
         </div>
         <nav class="sidebar__nav">
-          <a class="nav-btn" href="index.html">
+          <a class="nav-btn nav-btn--link" href="index.html">
             <span>Задачи</span>
           </a>
-          <a class="nav-btn nav-btn--link" href="team.html">
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>???????</span>
-          </a>
+          </button>
           <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>Контент-план</span>
             <small>скоро</small>
           </button>
-          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+          <a class="nav-btn nav-btn--placeholder nav-btn--link" href="team.html">
             <span>Команда</span>
-            <small>скоро</small>
-          </button>
+          </a>
           <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>Уведомления</span>
             <small>скоро</small>
           </button>
-          <a class="nav-btn nav-btn--active" href="roadmap.html">
+          <a class="nav-btn nav-btn--link nav-btn--active" href="roadmap.html">
             <span>Дорожная карта</span>
           </a>
         </nav>
         <div class="sidebar__footer">
-          <p class="sidebar__version">MVP 1.5</p>
+          <p class="sidebar__version">MVP 1.6</p>
           <button class="sidebar__logout" type="button">Выйти</button>
         </div>
       </aside>

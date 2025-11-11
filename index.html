@@ -16,7 +16,7 @@
   </head>
   <body>
     <div id="app" class="app-shell">
-      <aside class="sidebar">
+            <aside class="sidebar">
         <div class="brand">
           <div class="brand__logo" aria-hidden="true">ФКП</div>
           <div class="brand__text">
@@ -28,17 +28,16 @@
           <button class="nav-btn nav-btn--active" data-tab="tasks">
             <span>Задачи</span>
           </button>
-          <a class="nav-btn nav-btn--link" href="team.html">
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>???????</span>
-          </a>
+          </button>
           <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>Контент-план</span>
             <small>скоро</small>
           </button>
-          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+          <a class="nav-btn nav-btn--placeholder nav-btn--link" href="team.html">
             <span>Команда</span>
-            <small>скоро</small>
-          </button>
+          </a>
           <button class="nav-btn nav-btn--placeholder" type="button" disabled>
             <span>Уведомления</span>
             <small>скоро</small>
@@ -48,7 +47,7 @@
           </a>
         </nav>
         <div class="sidebar__footer">
-          <p class="sidebar__version">MVP 1.5</p>
+          <p class="sidebar__version">MVP 1.6</p>
           <button class="sidebar__logout" type="button">Выйти</button>
         </div>
       </aside>
