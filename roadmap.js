@@ -25,7 +25,7 @@
   let featuresError = null;
   let authToken = loadStoredToken();
   let currentUser = loadStoredUser();
-  let isAdmin = canManageRoadmap(currentUser, authToken);
+  let isAdmin = false;
   let editingFeatureId = null;
 
   const roadmapList = document.getElementById("roadmapList");
@@ -47,6 +47,7 @@
     bindVotes();
     bindAdminControls();
     bindAdminAccessWatcher();
+    refreshAdminAccess();
     ensureFreshUserProfile();
     initFeatureStatusSelect();
     loadFeaturesFromServer();
