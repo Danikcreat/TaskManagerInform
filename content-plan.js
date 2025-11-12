@@ -625,7 +625,7 @@
     return `
       ${
         statusLabel
-          ? `<div class="event-modal__status-pill"><span class="tag-pill tag-pill--muted">${escapeHtml(
+          ? `<div class="event-modal__status-pill"><span class="tag-pill tag-pill--muted event-modal__status-chip">${escapeHtml(
               statusLabel
             )}</span></div>`
           : ""

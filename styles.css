@@ -1522,7 +1522,7 @@ body {
   justify-content: center;
 }
 
-.event-modal__status-pill .tag-pill {
+.event-modal__status-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
