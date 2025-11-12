@@ -1520,6 +1520,8 @@ body {
 .event-modal__status-pill {
   display: flex;
   justify-content: center;
+  align-items: center;
+  width: 100%;
 }
 
 .event-modal__status-chip {
@@ -1528,6 +1530,8 @@ body {
   justify-content: center;
   min-width: 120px;
   text-align: center;
+  line-height: 1.2;
+  padding: 6px 14px;
 }
 
 .event-modal__block {
