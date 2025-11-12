@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   const STORAGE_KEYS = {
     user: "inform_user_v1",
     token: "inform_token_v1",
@@ -903,7 +903,7 @@
         (item) => `
           <div class="subtask-item" data-id="${item.id}">
             <input type="text" value="${escapeHtml(item.label || "")}" placeholder="Название" />
-            <input type="url" value="${escapeHtml(item.url || "")}" placeholder="https://..." />
+            <input type="text" value="${escapeHtml(item.url || "")}" placeholder="https://..." />
             <button type="button" class="ghost-btn" data-role="remove-attachment">×</button>
           </div>
         `
@@ -973,7 +973,7 @@
           `
             <div class="subtask-item" data-id="${uid()}">
               <input type="text" placeholder="Название" />
-              <input type="url" placeholder="https://..." />
+              <input type="text" placeholder="https://..." />
               <button type="button" class="ghost-btn" data-role="remove-attachment">×</button>
             </div>
           `
