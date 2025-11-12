@@ -536,6 +536,20 @@
     return `<span class="tag-pill tag-pill--muted">${formatStatusLabel(item.status)}</span>`;
   }
 
+  function getChannelLabel(channelId) {
+    const tab = TABS.find((entry) => entry.id === channelId);
+    return tab ? tab.label : channelId;
+  }
+
+  function getRelatedContent(eventId) {
+    if (!eventId) return [];
+    const normalizedId = String(eventId);
+    return ["instagram", "telegram"]
+      .flatMap((bucket) => state.data[bucket] || [])
+      .filter((contentItem) => contentItem.eventId && String(contentItem.eventId) === normalizedId)
+      .sort(compareItems);
+  }
+
   function formatStatusLabel(value) {
     const match = CONTENT_STATUSES.find((status) => status.value === value);
     if (match) return match.label;
@@ -552,7 +566,7 @@
   }
 
   function formatFullDate(dateIso) {
-    if (!dateIso) return "—";
+    if (!dateIso) return "-";
     const date = new Date(dateIso);
     return capitalize(
       new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(date)
@@ -560,9 +574,72 @@
   }
 
   function openDetailsModal(item) {
+    const isEvent = item.channel === "events";
+    const relatedContent = isEvent ? getRelatedContent(item.id) : [];
     const body = document.createElement("div");
-    body.className = "content-modal";
-    body.innerHTML = `
+    if (isEvent) {
+      body.className = "event-modal";
+      body.innerHTML = renderEventDetails(item, relatedContent);
+    } else {
+      body.className = "content-modal";
+      body.innerHTML = renderDefaultContentDetails(item);
+    }
+    const footer = document.createElement("div");
+    footer.className = "modal-card__footer";
+    if (canMutateActiveTab()) {
+      const editBtn = document.createElement("button");
+      editBtn.className = "primary-btn";
+      editBtn.type = "button";
+      editBtn.textContent = "Редактировать";
+      footer.appendChild(editBtn);
+    }
+    const modal = openModal({
+      title: item.title,
+      body,
+      footer: footer.childElementCount ? footer : null,
+    });
+    if (isEvent && modal.element) {
+      const card = modal.element.querySelector(".modal-card");
+      if (card) {
+        card.classList.add("modal-card--event");
+      }
+    }
+    if (footer.childElementCount) {
+      footer.querySelector("button").addEventListener("click", () => {
+        modal.close();
+        openEditorModal("edit", item);
+      });
+    }
+  }
+
+  function renderEventDetails(item, relatedContent) {
+    const descriptionSection = item.description
+      ? `
+      <section class="event-modal__block">
+        <p class="event-modal__section-title">Описание</p>
+        <p class="event-modal__description">${escapeHtml(item.description)}</p>
+      </section>
+    `
+      : "";
+    return `
+      <header class="event-modal__header">
+        <div>
+          <p class="event-modal__eyebrow">Мероприятие</p>
+          <h2 class="event-modal__title">${escapeHtml(item.title)}</h2>
+        </div>
+        ${item.type ? `<span class="event-modal__chip">${escapeHtml(item.type)}</span>` : ""}
+      </header>
+      <section class="event-modal__block">
+        <p class="event-modal__section-title">Основная информация</p>
+        ${renderEventMeta(item)}
+      </section>
+      ${descriptionSection}
+      ${renderRelatedContentSection(relatedContent)}
+    `;
+  }
+
+  function renderDefaultContentDetails(item) {
+    return `
       <div class="content-modal__section">
         <h3>Основная информация</h3>
         <dl>
@@ -587,26 +664,73 @@
           : ""
       }
     `;
-    const footer = document.createElement("div");
-    footer.className = "modal-card__footer";
-    if (canMutateActiveTab()) {
-      const editBtn = document.createElement("button");
-      editBtn.className = "primary-btn";
-      editBtn.type = "button";
-      editBtn.textContent = "Редактировать";
-      footer.appendChild(editBtn);
+  }
+
+  function renderEventMeta(item) {
+    const rows = [
+      { label: "Дата", value: escapeHtml(formatFullDate(item.date)) },
+      { label: "Время", value: item.time ? escapeHtml(item.time) : "" },
+      { label: "Тип", value: item.type ? escapeHtml(item.type) : "" },
+      { label: "Локация", value: item.location ? escapeHtml(item.location) : "" },
+    ].filter((row) => row.value);
+    if (!rows.length) {
+      return `<p class="event-modal__empty">Нет данных для отображения.</p>`;
     }
-    const modal = openModal({
-      title: item.title,
-      body,
-      footer: footer.childElementCount ? footer : null,
-    });
-    if (footer.childElementCount) {
-      footer.querySelector("button").addEventListener("click", () => {
-        modal.close();
-        openEditorModal("edit", item);
-      });
+    return `
+      <dl class="event-modal__meta">
+        ${rows
+          .map(
+            (row) => `
+          <div class="event-modal__meta-row">
+            <dt>${row.label}</dt>
+            <dd>${row.value}</dd>
+          </div>
+        `
+          )
+          .join("")}
+      </dl>
+    `;
+  }
+
+  function renderRelatedContentSection(items) {
+    if (!items.length) {
+      return `
+        <section class="event-modal__block">
+          <p class="event-modal__section-title">Связанный контент</p>
+          <p class="event-modal__empty">Пока нет материалов, связанных с этим мероприятием.</p>
+        </section>
+      `;
     }
+    return `
+      <section class="event-modal__block">
+        <p class="event-modal__section-title">Связанный контент</p>
+        <ul class="event-modal__related-list">
+          ${items.map(renderRelatedContentItem).join("")}
+        </ul>
+      </section>
+    `;
+  }
+
+  function renderRelatedContentItem(contentItem) {
+    const channelLabel = getChannelLabel(contentItem.channel);
+    const metaParts = [
+      escapeHtml(formatFullDate(contentItem.date)),
+      contentItem.time ? escapeHtml(contentItem.time) : "",
+      escapeHtml(channelLabel),
+    ].filter(Boolean);
+    return `
+      <li class="event-modal__related-item">
+        <div>
+          <p class="event-modal__related-title">${escapeHtml(contentItem.title)}</p>
+          <p class="event-modal__related-meta">${metaParts.join(" • ")}</p>
+        </div>
+        ${
+          contentItem.status
+            ? `<span class="tag-pill tag-pill--muted">${formatStatusLabel(contentItem.status)}</span>`
+            : ""
+        }
+      </li>
+    `;
   }
 
   function openEditorModal(mode, item) {
