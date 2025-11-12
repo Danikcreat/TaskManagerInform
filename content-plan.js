@@ -727,7 +727,9 @@
         </div>
         ${
           contentItem.status
-            ? `<span class="tag-pill tag-pill--muted">${formatStatusLabel(contentItem.status)}</span>`
+            ? `<span class="tag-pill tag-pill--muted event-modal__status-chip">${formatStatusLabel(
+                contentItem.status
+              )}</span>`
             : ""
         }
       </li>
