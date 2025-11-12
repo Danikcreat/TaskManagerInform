@@ -44,3 +44,19 @@ CREATE TABLE IF NOT EXISTS content_telegram (
   status TEXT,
   event_id INTEGER REFERENCES events (id) ON DELETE SET NULL
 );
+
+-- Links between content posts (any channel) and tasks from the task tracker.
+CREATE TABLE IF NOT EXISTS content_task_links (
+  id SERIAL PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
+  channel TEXT NOT NULL CHECK (channel IN ('instagram', 'telegram')),
+  content_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (task_id, channel, content_id)
+);
+
+CREATE INDEX IF NOT EXISTS content_task_links_content_idx
+  ON content_task_links (channel, content_id);
+
+CREATE INDEX IF NOT EXISTS content_task_links_task_idx
+  ON content_task_links (task_id);

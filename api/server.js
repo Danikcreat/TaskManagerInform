@@ -1509,6 +1509,18 @@ async function ensureContentPlanTables() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS content_task_links (
+      id BIGSERIAL PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
+      channel TEXT NOT NULL CHECK (channel IN ('instagram', 'telegram')),
+      content_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (task_id, channel, content_id)
+    )
+  `);
+
+  await pool.query(`
     ALTER TABLE events
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   `);
@@ -1536,6 +1548,26 @@ async function ensureContentPlanTables() {
   await pool.query(`
     ALTER TABLE content_telegram
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_task_links
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_task_links
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS content_task_links_content_idx
+    ON content_task_links (channel, content_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS content_task_links_task_idx
+    ON content_task_links (task_id)
   `);
 
   await pool.query("CREATE INDEX IF NOT EXISTS idx_events_date ON events (date)");
