@@ -861,9 +861,29 @@ async function ensureUsersTable() {
       login TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       position TEXT,
-      role TEXT NOT NULL CHECK (role IN (${USER_ROLE_VALUES_SQL}))
+      role TEXT NOT NULL CHECK (role IN (${USER_ROLE_VALUES_SQL})),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query("UPDATE users SET created_at = NOW() WHERE created_at IS NULL");
+  await pool.query("UPDATE users SET updated_at = NOW() WHERE updated_at IS NULL");
+
+  await pool.query("ALTER TABLE users ALTER COLUMN created_at SET DEFAULT NOW()");
+  await pool.query("ALTER TABLE users ALTER COLUMN updated_at SET DEFAULT NOW()");
+  await pool.query("ALTER TABLE users ALTER COLUMN created_at SET NOT NULL");
+  await pool.query("ALTER TABLE users ALTER COLUMN updated_at SET NOT NULL");
 
   await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_birth_date_check");
 
