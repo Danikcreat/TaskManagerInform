@@ -613,6 +613,10 @@
     const isEdit = mode === "edit";
     const form = document.createElement("form");
     form.className = "modal-form";
+    const formId = `content-plan-form-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    form.id = formId;
     const defaultDate = isEdit ? item.date : state.selectedDate;
     const defaultTime = isEdit ? item.time : "";
     const defaultTitle = isEdit ? item.title : "";
@@ -720,6 +724,7 @@
     submitBtn.type = "submit";
     submitBtn.className = "primary-btn";
     submitBtn.textContent = isEdit ? "Сохранить" : "Создать";
+    submitBtn.setAttribute("form", formId);
     footer.appendChild(submitBtn);
     const modal = openModal({
       title: isEdit ? "Редактирование" : "Новая запись",
