@@ -603,10 +603,6 @@
       if (card) {
         card.classList.add("modal-card--event");
       }
-      const customClose = modal.element.querySelector("[data-role='event-modal-close']");
-      if (customClose) {
-        customClose.addEventListener("click", () => modal.close());
-      }
     }
     if (footer.childElementCount) {
       footer.querySelector("button").addEventListener("click", () => {
@@ -617,6 +613,7 @@
   }
 
   function renderEventDetails(item, relatedContent) {
+    const statusLabel = item.status ? formatStatusLabel(item.status) : "";
     const descriptionSection = item.description
       ? `
       <section class="event-modal__block">
@@ -625,16 +622,14 @@
       </section>
     `
       : "";
-    const statusLabel = item.status ? formatStatusLabel(item.status) : "Черновик";
     return `
-      <header class="event-modal__header">
-        <button class="modal__close event-modal__close" type="button" aria-label="Закрыть" data-role="event-modal-close">×</button>
-        <div class="event-modal__heading">
-          <p class="event-modal__eyebrow">Мероприятие</p>
-          <h2 class="event-modal__title">${escapeHtml(item.title)}</h2>
-          <span class="tag-pill tag-pill--muted event-modal__status">${escapeHtml(statusLabel)}</span>
-        </div>
-      </header>
+      ${
+        statusLabel
+          ? `<div class="event-modal__status-pill"><span class="tag-pill tag-pill--muted">${escapeHtml(
+              statusLabel
+            )}</span></div>`
+          : ""
+      }
       <section class="event-modal__block">
         <p class="event-modal__section-title">Основная информация</p>
         ${renderEventMeta(item)}

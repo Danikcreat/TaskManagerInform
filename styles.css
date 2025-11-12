@@ -1054,14 +1054,6 @@ body {
   gap: 16px;
 }
 
-.modal-card--event .modal-card__header {
-  justify-content: flex-end;
-}
-
-.modal-card--event .modal-card__header h2 {
-  display: none;
-}
-
 .modal-card__footer {
   display: flex;
   justify-content: flex-end;
@@ -1525,41 +1517,17 @@ body {
   gap: 24px;
 }
 
-.event-modal__header {
+.event-modal__status-pill {
   display: flex;
-  flex-direction: column;
+  justify-content: center;
+}
+
+.event-modal__status-pill .tag-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-}
-
-.event-modal__heading {
+  justify-content: center;
+  min-width: 120px;
   text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
-.event-modal__close {
-  align-self: flex-end;
-}
-
-.event-modal__eyebrow {
-  margin: 0;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.event-modal__title {
-  margin: 4px 0 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.event-modal__status {
-  align-self: center;
 }
 
 .event-modal__block {
