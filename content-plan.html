@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Контент-план | Media Task Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">МК</div>
+          <div class="brand__text">
+            <p class="brand__title">Медиа Команда</p>
+            <p class="brand__subtitle">Media Task Manager</p>
+          </div>
+        </div>
+        <nav class="sidebar__nav">
+          <a class="nav-btn nav-btn--link" href="index.html">
+            <span>Задачи</span>
+          </a>
+          <a class="nav-btn nav-btn--link nav-btn--active" href="content-plan.html">
+            <span>Контент-план</span>
+          </a>
+          <a class="nav-btn nav-btn--link" href="team.html">
+            <span>Команда</span>
+          </a>
+          <button class="nav-btn nav-btn--placeholder" type="button" disabled>
+            <span>Аналитика</span>
+            <small>Скоро</small>
+          </button>
+          <a class="nav-btn nav-btn--link" href="roadmap.html">
+            <span>Дорожная карта</span>
+          </a>
+        </nav>
+        <div class="sidebar__footer">
+          <p class="sidebar__version">MVP 3.0</p>
+          <button class="sidebar__logout" type="button">Выйти</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace__header workspace__header--stacked">
+          <div>
+            <p class="workspace__eyebrow">Планирование</p>
+            <h1 class="workspace__title">Контент-план</h1>
+            <p class="workspace__subtitle">
+              Управляйте мероприятиями и публикациями без перезагрузки страницы.
+            </p>
+          </div>
+          <div class="user-chip" id="userChip" aria-live="polite"></div>
+        </header>
+
+        <section class="panel panel--stacked content-plan-layout">
+          <div class="content-plan__primary">
+            <div class="content-plan__tabs" role="tablist" aria-label="Тип контента">
+              <button class="content-plan__tab is-active" type="button" data-tab="events" role="tab">Мероприятия</button>
+              <button class="content-plan__tab" type="button" data-tab="instagram" role="tab">КП Инста</button>
+              <button class="content-plan__tab" type="button" data-tab="telegram" role="tab">КП Телега</button>
+            </div>
+
+            <div class="content-plan__toolbar">
+              <div class="content-plan__month-nav" aria-live="polite">
+                <button class="ghost-icon-btn" type="button" data-role="month-prev" aria-label="Предыдущий месяц">
+                  <span aria-hidden="true">‹</span>
+                </button>
+                <p class="content-plan__month-label" id="monthLabel">—</p>
+                <button class="ghost-icon-btn" type="button" data-role="month-next" aria-label="Следующий месяц">
+                  <span aria-hidden="true">›</span>
+                </button>
+              </div>
+              <button class="ghost-btn" type="button" id="refreshBtn">Обновить</button>
+            </div>
+
+            <p class="content-plan__error" id="contentPlanError" role="alert"></p>
+
+            <div class="calendar-grid" id="calendarGrid" aria-live="polite"></div>
+
+            <div class="content-plan__list-panel">
+              <div class="panel__header">
+                <div>
+                  <h2 class="panel__title">Список записей</h2>
+                  <p class="panel__subtitle">Полный список выбранного типа за месяц</p>
+                </div>
+              </div>
+              <div class="content-plan__list" id="monthList" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <aside class="content-plan__sidebar" id="detailSidebar">
+            <div class="content-plan__day-header">
+              <div>
+                <p class="content-plan__day-eyebrow">Выбранный день</p>
+                <h2 class="content-plan__day-title" id="selectedDayLabel">—</h2>
+              </div>
+              <button
+                class="content-plan__add-btn"
+                type="button"
+                id="addEntryBtn"
+                aria-label="Добавить запись"
+              >
+                +
+              </button>
+            </div>
+            <div class="content-plan__day-list" id="selectedDayList" aria-live="polite"></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <div id="modalRoot" aria-live="polite"></div>
+    <script src="content-plan.js" defer></script>
+  </body>
+</html>

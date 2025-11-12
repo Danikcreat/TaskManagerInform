@@ -35,6 +35,58 @@ const DEFAULT_SUPER_ADMIN = {
   position: process.env.DEFAULT_SUPER_ADMIN_POSITION || "Super Administrator",
 };
 
+const CONTENT_PLAN_BUCKETS = Object.freeze({
+  EVENTS: "events",
+  INSTAGRAM: "instagram",
+  TELEGRAM: "telegram",
+});
+
+const CONTENT_PLAN_TABLES = Object.freeze({
+  [CONTENT_PLAN_BUCKETS.EVENTS]: "events",
+  [CONTENT_PLAN_BUCKETS.INSTAGRAM]: "content_instagram",
+  [CONTENT_PLAN_BUCKETS.TELEGRAM]: "content_telegram",
+});
+
+const CONTENT_PLAN_PERMISSIONS = Object.freeze({
+  [CONTENT_PLAN_BUCKETS.EVENTS]: new Set([USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN]),
+  [CONTENT_PLAN_BUCKETS.INSTAGRAM]: new Set([
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.ADMIN,
+    USER_ROLES.CONTENT_MANAGER,
+  ]),
+  [CONTENT_PLAN_BUCKETS.TELEGRAM]: new Set([
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.ADMIN,
+    USER_ROLES.CONTENT_MANAGER,
+  ]),
+});
+
+const MAX_CONTENT_PLAN_RANGE_DAYS = Math.max(
+  7,
+  Number(process.env.CONTENT_PLAN_RANGE_LIMIT_DAYS || 93)
+);
+
+const CONTENT_PLAN_BUCKET_CONFIG = Object.freeze({
+  [CONTENT_PLAN_BUCKETS.EVENTS]: {
+    bucket: CONTENT_PLAN_BUCKETS.EVENTS,
+    table: CONTENT_PLAN_TABLES[CONTENT_PLAN_BUCKETS.EVENTS],
+    columns: ["title", "description", "date", "time", "location", "type"],
+    normalizer: normalizeEventPayload,
+  },
+  [CONTENT_PLAN_BUCKETS.INSTAGRAM]: {
+    bucket: CONTENT_PLAN_BUCKETS.INSTAGRAM,
+    table: CONTENT_PLAN_TABLES[CONTENT_PLAN_BUCKETS.INSTAGRAM],
+    columns: ["title", "description", "date", "time", "type", "status", "event_id"],
+    normalizer: (payload, options) => normalizeContentPayload(payload, options),
+  },
+  [CONTENT_PLAN_BUCKETS.TELEGRAM]: {
+    bucket: CONTENT_PLAN_BUCKETS.TELEGRAM,
+    table: CONTENT_PLAN_TABLES[CONTENT_PLAN_BUCKETS.TELEGRAM],
+    columns: ["title", "description", "date", "time", "type", "status", "event_id"],
+    normalizer: (payload, options) => normalizeContentPayload(payload, options),
+  },
+});
+
 const PORT = process.env.PORT || 4000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -604,6 +656,107 @@ app.delete(
   })
 );
 
+app.get(
+  "/api/content-plan",
+  asyncHandler(async (req, res) => {
+    const { value: range, error } = resolveContentPlanRange(req.query || {});
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    const payload = await fetchContentPlanRange(range);
+    res.json(payload);
+  })
+);
+
+app.post(
+  "/api/content-plan/:bucket",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const config = getContentPlanBucketConfig(req.params.bucket);
+    if (!config) {
+      res.status(404).json({ message: "Неизвестный раздел контент-плана." });
+      return;
+    }
+    if (!canManageContentPlanBucket(req.auth?.role, config.bucket)) {
+      res
+        .status(403)
+        .json({ message: "Недостаточно прав для изменения записей контент-плана." });
+      return;
+    }
+    const { value, error } = config.normalizer(req.body || {}, { partial: false });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    const record = await insertContentPlanItem(config, value);
+    res.status(201).json(record);
+  })
+);
+
+app.put(
+  "/api/content-plan/:bucket/:id",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const config = getContentPlanBucketConfig(req.params.bucket);
+    if (!config) {
+      res.status(404).json({ message: "Неизвестный раздел контент-плана." });
+      return;
+    }
+    if (!canManageContentPlanBucket(req.auth?.role, config.bucket)) {
+      res
+        .status(403)
+        .json({ message: "Недостаточно прав для изменения записей контент-плана." });
+      return;
+    }
+    const itemId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      res.status(400).json({ message: "Некорректный идентификатор записи." });
+      return;
+    }
+    const { value, error } = config.normalizer(req.body || {}, { partial: true });
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    const record = await updateContentPlanItem(config, itemId, value);
+    if (!record) {
+      res.status(404).json({ message: "Запись не найдена." });
+      return;
+    }
+    res.json(record);
+  })
+);
+
+app.delete(
+  "/api/content-plan/:bucket/:id",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const config = getContentPlanBucketConfig(req.params.bucket);
+    if (!config) {
+      res.status(404).json({ message: "Неизвестный раздел контент-плана." });
+      return;
+    }
+    if (!canManageContentPlanBucket(req.auth?.role, config.bucket)) {
+      res
+        .status(403)
+        .json({ message: "Недостаточно прав для изменения записей контент-плана." });
+      return;
+    }
+    const itemId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      res.status(400).json({ message: "Некорректный идентификатор записи." });
+      return;
+    }
+    const removed = await removeContentPlanItem(config, itemId);
+    if (!removed) {
+      res.status(404).json({ message: "Запись не найдена." });
+      return;
+    }
+    res.status(204).send();
+  })
+);
+
 const staticDir = path.join(__dirname, "..");
 app.use(express.static(staticDir));
 
@@ -800,6 +953,392 @@ function normalizeFeaturePayload(raw, { partial } = { partial: false }) {
   return { value: payload };
 }
 
+function normalizeEventPayload(raw, { partial } = { partial: false }) {
+  const source = raw || {};
+  const payload = {};
+
+  if (!partial || source.title !== undefined) {
+    const title = normalizeRequiredText(source.title);
+    if (!title) {
+      return { error: "Название обязательно." };
+    }
+    payload.title = title;
+  }
+
+  if (!partial || source.description !== undefined) {
+    payload.description = normalizeOptionalText(source.description);
+  }
+
+  if (!partial || source.date !== undefined) {
+    const normalizedDate = normalizeIsoDate(source.date);
+    if (!normalizedDate) {
+      return { error: "Некорректная дата. Используйте формат ГГГГ-ММ-ДД." };
+    }
+    payload.date = normalizedDate;
+  }
+
+  if (!partial || source.time !== undefined) {
+    const { value: normalizedTime, error } = normalizeTimeValue(source.time, {
+      halfHourOnly: false,
+    });
+    if (error) return { error };
+    payload.time = normalizedTime;
+  }
+
+  if (!partial || source.location !== undefined) {
+    payload.location = normalizeOptionalText(source.location);
+  }
+
+  if (!partial || source.type !== undefined) {
+    const type = normalizeRequiredText(source.type);
+    if (!type) {
+      return { error: "Тип обязателен." };
+    }
+    payload.type = type;
+  }
+
+  if (partial) {
+    cleanupPartialPayload(payload);
+    if (Object.keys(payload).length === 0) {
+      return { error: "Нет данных для обновления." };
+    }
+  } else {
+    if (!("description" in payload)) payload.description = null;
+    if (!("time" in payload)) payload.time = null;
+    if (!("location" in payload)) payload.location = null;
+  }
+
+  return { value: payload };
+}
+
+function normalizeContentPayload(raw, { partial } = { partial: false }) {
+  const source = raw || {};
+  const payload = {};
+
+  if (!partial || source.title !== undefined) {
+    const title = normalizeRequiredText(source.title);
+    if (!title) {
+      return { error: "Название обязательно." };
+    }
+    payload.title = title;
+  }
+
+  if (!partial || source.description !== undefined) {
+    payload.description = normalizeOptionalText(source.description);
+  }
+
+  if (!partial || source.date !== undefined) {
+    const normalizedDate = normalizeIsoDate(source.date);
+    if (!normalizedDate) {
+      return { error: "Некорректная дата. Используйте формат ГГГГ-ММ-ДД." };
+    }
+    payload.date = normalizedDate;
+  }
+
+  if (!partial || source.time !== undefined) {
+    const { value: normalizedTime, error } = normalizeTimeValue(source.time, {
+      halfHourOnly: true,
+    });
+    if (error) return { error };
+    payload.time = normalizedTime;
+  }
+
+  if (!partial || source.type !== undefined) {
+    payload.type = normalizeOptionalText(source.type);
+  }
+
+  if (!partial || source.status !== undefined) {
+    payload.status = normalizeOptionalText(source.status);
+  }
+
+  const rawEventId =
+    source.event_id !== undefined ? source.event_id : source.eventId;
+  if (!partial || rawEventId !== undefined) {
+    if (rawEventId === undefined || rawEventId === null || rawEventId === "") {
+      payload.event_id = null;
+    } else {
+      const eventId = Number.parseInt(rawEventId, 10);
+      if (!Number.isFinite(eventId) || eventId <= 0) {
+        return { error: "Некорректная привязка к событию." };
+      }
+      payload.event_id = eventId;
+    }
+  }
+
+  if (partial) {
+    cleanupPartialPayload(payload);
+    if (Object.keys(payload).length === 0) {
+      return { error: "Нет данных для обновления." };
+    }
+  } else {
+    if (!("description" in payload)) payload.description = null;
+    if (!("time" in payload)) payload.time = null;
+    if (!("type" in payload)) payload.type = null;
+    if (!("status" in payload)) payload.status = null;
+    if (!("event_id" in payload)) payload.event_id = null;
+  }
+
+  return { value: payload };
+}
+
+function normalizeTimeValue(value, { halfHourOnly = false } = {}) {
+  if (value === undefined || value === null) {
+    return { value: null };
+  }
+  const raw = String(value).trim();
+  if (!raw) {
+    return { value: null };
+  }
+  const pattern = halfHourOnly
+    ? /^([01]\d|2[0-3]):(00|30)$/
+    : /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!pattern.test(raw)) {
+    return { error: "Некорректное время. Используйте формат ЧЧ:ММ." };
+  }
+  return { value: raw };
+}
+
+function normalizeOptionalText(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const raw = String(value).trim();
+  return raw || null;
+}
+
+function normalizeRequiredText(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const raw = String(value).trim();
+  return raw || null;
+}
+
+function cleanupPartialPayload(payload) {
+  Object.keys(payload).forEach((key) => {
+    if (payload[key] === undefined) {
+      delete payload[key];
+    }
+  });
+}
+
+function resolveContentPlanRange(query = {}) {
+  let from = normalizeIsoDate(query.from);
+  let to = normalizeIsoDate(query.to);
+
+  const hasMonthParams = query.month !== undefined || query.year !== undefined;
+  if ((!from || !to) && hasMonthParams) {
+    const normalized = normalizeMonthYearRange(query.month, query.year);
+    if (!normalized) {
+      return { error: "Некорректные параметры месяца или года." };
+    }
+    from = normalized.from;
+    to = normalized.to;
+  }
+
+  if (!from || !to) {
+    const fallback = getDefaultMonthRange();
+    from = fallback.from;
+    to = fallback.to;
+  }
+
+  if (from > to) {
+    return { error: "Дата начала больше даты окончания." };
+  }
+
+  if (countDaysBetween(from, to) > MAX_CONTENT_PLAN_RANGE_DAYS) {
+    return {
+      error: `Диапазон слишком большой. Максимум ${MAX_CONTENT_PLAN_RANGE_DAYS} дней.`,
+    };
+  }
+
+  return { value: { from, to } };
+}
+
+function getDefaultMonthRange() {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return {
+    from: formatISODate(start),
+    to: formatISODate(end),
+  };
+}
+
+function normalizeMonthYearRange(monthValue, yearValue) {
+  const month = Number.parseInt(monthValue, 10);
+  const year = Number.parseInt(yearValue, 10);
+  if (!Number.isFinite(month) || month < 1 || month > 12) {
+    return null;
+  }
+  if (!Number.isFinite(year) || year < 1970 || year > 9999) {
+    return null;
+  }
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  return {
+    from: formatISODate(start),
+    to: formatISODate(end),
+  };
+}
+
+function normalizeIsoDate(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(raw)) {
+    return raw;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return formatISODate(parsed);
+}
+
+function formatISODate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function countDaysBetween(from, to) {
+  const start = isoToEpoch(from);
+  const end = isoToEpoch(to);
+  if (start === null || end === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const diff = end - start;
+  return Math.floor(diff / 86400000) + 1;
+}
+
+function isoToEpoch(value) {
+  const match = value?.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  return Date.UTC(year, month, day);
+}
+
+function fetchContentPlanRange(range) {
+  return Promise.all([
+    fetchContentPlanCollection(CONTENT_PLAN_BUCKETS.EVENTS, range),
+    fetchContentPlanCollection(CONTENT_PLAN_BUCKETS.INSTAGRAM, range),
+    fetchContentPlanCollection(CONTENT_PLAN_BUCKETS.TELEGRAM, range),
+  ]).then(([events, instagram, telegram]) => ({
+    range,
+    events,
+    instagram,
+    telegram,
+  }));
+}
+
+async function fetchContentPlanCollection(bucket, range) {
+  const config = getContentPlanBucketConfig(bucket);
+  if (!config) return [];
+  const query = `
+    SELECT *
+    FROM ${config.table}
+    WHERE date >= $1 AND date <= $2
+    ORDER BY date ASC, time ASC NULLS LAST, id ASC
+  `;
+  const { rows } = await pool.query(query, [range.from, range.to]);
+  return rows.map((row) => mapContentPlanRow(config.bucket, row)).filter(Boolean);
+}
+
+function getContentPlanBucketConfig(rawBucket) {
+  if (!rawBucket) return null;
+  const normalized = String(rawBucket).trim().toLowerCase();
+  if (!normalized) return null;
+  return CONTENT_PLAN_BUCKET_CONFIG[normalized] || null;
+}
+
+function canManageContentPlanBucket(role, bucket) {
+  if (!role || !bucket) return false;
+  const allowed = CONTENT_PLAN_PERMISSIONS[bucket];
+  if (!allowed) return false;
+  return allowed.has(role);
+}
+
+async function insertContentPlanItem(config, payload) {
+  const columns = config.columns;
+  const values = columns.map((column) => (payload[column] !== undefined ? payload[column] : null));
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
+  const query = `
+    INSERT INTO ${config.table} (${columns.join(", ")})
+    VALUES (${placeholders})
+    RETURNING *
+  `;
+  const { rows } = await pool.query(query, values);
+  return mapContentPlanRow(config.bucket, rows[0]);
+}
+
+async function updateContentPlanItem(config, id, payload) {
+  const entries = Object.entries(payload);
+  if (!entries.length) {
+    return null;
+  }
+  const setFragments = entries.map(
+    ([column], index) => `${column} = $${index + 1}`
+  );
+  const values = entries.map(([, value]) => value);
+  const query = `
+    UPDATE ${config.table}
+    SET ${setFragments.join(", ")}, updated_at = NOW()
+    WHERE id = $${entries.length + 1}
+    RETURNING *
+  `;
+  const { rows } = await pool.query(query, [...values, id]);
+  if (!rows[0]) {
+    return null;
+  }
+  return mapContentPlanRow(config.bucket, rows[0]);
+}
+
+async function removeContentPlanItem(config, id) {
+  const { rowCount } = await pool.query(`DELETE FROM ${config.table} WHERE id = $1`, [id]);
+  return rowCount > 0;
+}
+
+function mapContentPlanRow(bucket, row) {
+  if (!row) return null;
+  const base = {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    date: row.date,
+    time: row.time,
+    type: row.type,
+    channel: bucket,
+    createdAt: toIsoTimestamp(row.created_at),
+    updatedAt: toIsoTimestamp(row.updated_at),
+  };
+  if (bucket === CONTENT_PLAN_BUCKETS.EVENTS) {
+    base.location = row.location;
+  } else {
+    base.status = row.status;
+    base.eventId = row.event_id;
+  }
+  return base;
+}
+
+function toIsoTimestamp(value) {
+  if (!value) return null;
+  try {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+    return date.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeCollection(items, mapper) {
   if (!Array.isArray(items)) return [];
   return items
@@ -834,6 +1373,7 @@ async function initializeDatabase(attempt = 1) {
     `);
 
     await ensureUsersTable();
+    await ensureContentPlanTables();
     await ensureDefaultSuperAdmin();
     await ensureSeedData();
   } catch (error) {
@@ -908,6 +1448,102 @@ async function ensureUsersTable() {
       birth_date IS NULL OR birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
     )
   `
+  );
+}
+
+async function ensureContentPlanTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      date TEXT NOT NULL CHECK (
+        date ~ '^[0-9]{4}-(0[1-9]|1[0-2])-[0-3][0-9]$'
+      ),
+      time TEXT CHECK (
+        time IS NULL OR time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+      ),
+      location TEXT,
+      type TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS content_instagram (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      date TEXT NOT NULL CHECK (
+        date ~ '^[0-9]{4}-(0[1-9]|1[0-2])-[0-3][0-9]$'
+      ),
+      time TEXT CHECK (
+        time IS NULL OR time ~ '^([01][0-9]|2[0-3]):(00|30)$'
+      ),
+      type TEXT,
+      status TEXT,
+      event_id INTEGER REFERENCES events (id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS content_telegram (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      date TEXT NOT NULL CHECK (
+        date ~ '^[0-9]{4}-(0[1-9]|1[0-2])-[0-3][0-9]$'
+      ),
+      time TEXT CHECK (
+        time IS NULL OR time ~ '^([01][0-9]|2[0-3]):(00|30)$'
+      ),
+      type TEXT,
+      status TEXT,
+      event_id INTEGER REFERENCES events (id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_instagram
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_instagram
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_telegram
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_telegram
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_events_date ON events (date)");
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_content_instagram_date ON content_instagram (date)"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_content_telegram_date ON content_telegram (date)"
   );
 }
 
