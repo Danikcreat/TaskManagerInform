@@ -757,6 +757,107 @@ app.delete(
   })
 );
 
+app.get(
+  "/api/content-plan/:bucket/:id/assets",
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const assets = await fetchContentAssets(resolved.config.bucket, resolved.itemId);
+    res.json(assets);
+  })
+);
+
+app.post(
+  "/api/content-plan/:bucket/:id/assets",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const { value, error } = normalizeContentAssetPayload(req.body || {});
+    if (error) {
+      res.status(400).json({ message: error });
+      return;
+    }
+    const asset = await insertContentAsset(resolved.config.bucket, resolved.itemId, value);
+    res.status(201).json(asset);
+  })
+);
+
+app.delete(
+  "/api/content-plan/:bucket/:id/assets/:assetId",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const assetId = Number.parseInt(req.params.assetId, 10);
+    if (!Number.isFinite(assetId) || assetId <= 0) {
+      res.status(400).json({ message: "Некорректный идентификатор вложения." });
+      return;
+    }
+    const removed = await removeContentAsset(resolved.config.bucket, resolved.itemId, assetId);
+    if (!removed) {
+      res.status(404).json({ message: "Вложение не найдено." });
+      return;
+    }
+    res.status(204).send();
+  })
+);
+
+app.get(
+  "/api/content-plan/:bucket/:id/tasks",
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const tasks = await fetchLinkedContentTasks(resolved.config.bucket, resolved.itemId);
+    res.json(tasks);
+  })
+);
+
+app.post(
+  "/api/content-plan/:bucket/:id/tasks",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const taskId = String(req.body?.taskId || "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Не указан идентификатор задачи." });
+      return;
+    }
+    const task = await getTaskById(taskId);
+    if (!task) {
+      res.status(404).json({ message: "Задача не найдена." });
+      return;
+    }
+    const link = await linkTaskToContent(resolved.config.bucket, resolved.itemId, taskId);
+    if (!link) {
+      res.status(409).json({ message: "Задача уже привязана к публикации." });
+      return;
+    }
+    res.status(201).json(link);
+  })
+);
+
+app.delete(
+  "/api/content-plan/:bucket/:id/tasks/:taskId",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const resolved = await resolveContentItemRequest(req, res, { allowEvents: false });
+    if (!resolved) return;
+    const taskId = String(req.params.taskId || "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Не указан идентификатор задачи." });
+      return;
+    }
+    const removed = await unlinkTaskFromContent(resolved.config.bucket, resolved.itemId, taskId);
+    if (!removed) {
+      res.status(404).json({ message: "Связь задачи с публикацией не найдена." });
+      return;
+    }
+    res.status(204).send();
+  })
+);
+
 const staticDir = path.join(__dirname, "..");
 app.use(express.static(staticDir));
 
@@ -1326,6 +1427,165 @@ function mapContentPlanRow(bucket, row) {
   return base;
 }
 
+async function findContentPlanItem(config, id) {
+  const { rows } = await pool.query(
+    `SELECT * FROM ${config.table} WHERE id = $1 LIMIT 1`,
+    [id]
+  );
+  return mapContentPlanRow(config.bucket, rows[0]);
+}
+
+async function resolveContentItemRequest(req, res, { allowEvents = true } = {}) {
+  const config = getContentPlanBucketConfig(req.params.bucket);
+  if (!config) {
+    res.status(404).json({ message: "Коллекция не найдена." });
+    return null;
+  }
+  if (!allowEvents && config.bucket === CONTENT_PLAN_BUCKETS.EVENTS) {
+    res.status(400).json({ message: "Операция доступна только для публикаций." });
+    return null;
+  }
+  const itemId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(itemId) || itemId <= 0) {
+    res.status(400).json({ message: "Некорректный идентификатор записи." });
+    return null;
+  }
+  const record = await findContentPlanItem(config, itemId);
+  if (!record) {
+    res.status(404).json({ message: "Запись не найдена." });
+    return null;
+  }
+  return { config, itemId, record };
+}
+
+async function fetchContentAssets(channel, contentId) {
+  const { rows } = await pool.query(
+    `
+      SELECT *
+      FROM content_assets
+      WHERE channel = $1 AND content_id = $2
+      ORDER BY created_at DESC, id DESC
+    `,
+    [channel, contentId]
+  );
+  return rows.map(mapContentAssetRow).filter(Boolean);
+}
+
+function mapContentAssetRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title,
+    url: row.url,
+    notes: row.notes,
+    channel: row.channel,
+    contentId: row.content_id,
+    createdAt: toIsoTimestamp(row.created_at),
+    updatedAt: toIsoTimestamp(row.updated_at),
+  };
+}
+
+function normalizeContentAssetPayload(raw) {
+  const title = String(raw?.title || "").trim();
+  if (!title) {
+    return { error: 'Field "title" is required' };
+  }
+  const url = raw?.url ? String(raw.url).trim() : "";
+  const notes = raw?.notes ? String(raw.notes).trim() : "";
+  return {
+    value: {
+      title,
+      url,
+      notes,
+    },
+  };
+}
+
+async function insertContentAsset(channel, contentId, payload) {
+  const { rows } = await pool.query(
+    `
+      INSERT INTO content_assets (channel, content_id, title, url, notes)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `,
+    [channel, contentId, payload.title, payload.url || null, payload.notes || null]
+  );
+  return mapContentAssetRow(rows[0]);
+}
+
+async function removeContentAsset(channel, contentId, assetId) {
+  const { rowCount } = await pool.query(
+    `
+      DELETE FROM content_assets
+      WHERE id = $1 AND channel = $2 AND content_id = $3
+    `,
+    [assetId, channel, contentId]
+  );
+  return rowCount > 0;
+}
+
+async function fetchLinkedContentTasks(channel, contentId) {
+  const { rows } = await pool.query(
+    `
+      SELECT ctl.task_id, ctl.created_at AS linked_at, t.payload
+      FROM content_task_links ctl
+      LEFT JOIN tasks t ON t.id = ctl.task_id
+      WHERE ctl.channel = $1 AND ctl.content_id = $2
+      ORDER BY ctl.created_at DESC, ctl.id DESC
+    `,
+    [channel, contentId]
+  );
+  return rows
+    .map((row) => {
+      const task = rowToTask(row);
+      if (!task) return null;
+      return {
+        ...task,
+        linkedAt: toIsoTimestamp(row.linked_at),
+      };
+    })
+    .filter(Boolean);
+}
+
+async function linkTaskToContent(channel, contentId, taskId) {
+  const { rows } = await pool.query(
+    `
+      INSERT INTO content_task_links (task_id, channel, content_id, created_at, updated_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (task_id, channel, content_id) DO NOTHING
+      RETURNING created_at
+    `,
+    [taskId, channel, contentId]
+  );
+  if (!rows[0]) {
+    return null;
+  }
+  const task = await getTaskById(taskId);
+  if (!task) {
+    return null;
+  }
+  return {
+    ...task,
+    linkedAt: toIsoTimestamp(rows[0].created_at),
+  };
+}
+
+async function unlinkTaskFromContent(channel, contentId, taskId) {
+  const { rowCount } = await pool.query(
+    `
+      DELETE FROM content_task_links
+      WHERE task_id = $1 AND channel = $2 AND content_id = $3
+    `,
+    [taskId, channel, contentId]
+  );
+  return rowCount > 0;
+}
+
+async function getTaskById(taskId) {
+  const { rows } = await pool.query("SELECT payload FROM tasks WHERE id = $1 LIMIT 1", [taskId]);
+  return rowToTask(rows[0]);
+}
+
 function toIsoTimestamp(value) {
   if (!value) return null;
   try {
@@ -1521,6 +1781,19 @@ async function ensureContentPlanTables() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS content_assets (
+      id BIGSERIAL PRIMARY KEY,
+      channel TEXT NOT NULL CHECK (channel IN ('instagram', 'telegram')),
+      content_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
     ALTER TABLE events
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   `);
@@ -1558,6 +1831,16 @@ async function ensureContentPlanTables() {
   await pool.query(`
     ALTER TABLE content_task_links
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_assets
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await pool.query(`
+    ALTER TABLE content_assets
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   `);
 
   await pool.query(`
@@ -1568,6 +1851,11 @@ async function ensureContentPlanTables() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS content_task_links_task_idx
     ON content_task_links (task_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS content_assets_content_idx
+    ON content_assets (channel, content_id)
   `);
 
   await pool.query("CREATE INDEX IF NOT EXISTS idx_events_date ON events (date)");

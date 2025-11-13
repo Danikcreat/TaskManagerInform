@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS content_task_links (
   channel TEXT NOT NULL CHECK (channel IN ('instagram', 'telegram')),
   content_id INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (task_id, channel, content_id)
 );
 
@@ -60,3 +61,18 @@ CREATE INDEX IF NOT EXISTS content_task_links_content_idx
 
 CREATE INDEX IF NOT EXISTS content_task_links_task_idx
   ON content_task_links (task_id);
+
+-- Assets (ссылки/материалы) для публикаций.
+CREATE TABLE IF NOT EXISTS content_assets (
+  id SERIAL PRIMARY KEY,
+  channel TEXT NOT NULL CHECK (channel IN ('instagram', 'telegram')),
+  content_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS content_assets_content_idx
+  ON content_assets (channel, content_id);

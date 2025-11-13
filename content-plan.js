@@ -32,13 +32,26 @@
     { value: "published", label: "Опубликовано" },
   ];
 
-  const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   const CONTENT_TYPE_OPTIONS = [
     { value: "Пост", label: "Пост" },
     { value: "Карусель", label: "Карусель" },
     { value: "Сторис", label: "Сторис" },
     { value: "Рилс", label: "Рилс" },
   ];
+
+  const TASK_PRIORITY_OPTIONS = [
+    { value: "high", label: "Высокий" },
+    { value: "medium", label: "Средний" },
+    { value: "low", label: "Низкий" },
+  ];
+
+  const TASK_STATUS_OPTIONS = [
+    { value: "pending", label: "В ожидании" },
+    { value: "in_progress", label: "В работе" },
+    { value: "done", label: "Готово" },
+  ];
+
+  const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   const TODAY_ISO = formatISODate(new Date());
 
   const now = new Date();
@@ -60,6 +73,7 @@
     error: "",
     user: loadStoredUser(),
     token: loadStoredToken(),
+    extras: new Map(),
   };
 
   const refs = {
@@ -580,16 +594,18 @@
   }
 
   function openDetailsModal(item) {
-    const isEvent = item.channel === "events";
-    const relatedContent = isEvent ? getRelatedContent(item.id) : [];
-    const body = document.createElement("div");
-    if (isEvent) {
-      body.className = "event-modal";
-      body.innerHTML = renderEventDetails(item, relatedContent);
-    } else {
-      body.className = "content-modal";
-      body.innerHTML = renderDefaultContentDetails(item);
+    if (item.channel === "events") {
+      openEventDetailsModal(item);
+      return;
     }
+    openContentPostModal(item);
+  }
+
+  function openEventDetailsModal(item) {
+    const relatedContent = getRelatedContent(item.id);
+    const body = document.createElement("div");
+    body.className = "event-modal";
+    body.innerHTML = renderEventDetails(item, relatedContent);
     const footer = document.createElement("div");
     footer.className = "modal-card__footer";
     if (canMutateActiveTab()) {
@@ -604,7 +620,7 @@
       body,
       footer: footer.childElementCount ? footer : null,
     });
-    if (isEvent && modal.element) {
+    if (modal.element) {
       const card = modal.element.querySelector(".modal-card");
       if (card) {
         card.classList.add("modal-card--event");
@@ -642,34 +658,6 @@
       </section>
       ${descriptionSection}
       ${renderRelatedContentSection(relatedContent)}
-    `;
-  }
-
-  function renderDefaultContentDetails(item) {
-    return `
-      <div class="content-modal__section">
-        <h3>Основная информация</h3>
-        <dl>
-          <div><dt>Дата</dt><dd>${formatFullDate(item.date)}</dd></div>
-          ${item.time ? `<div><dt>Время</dt><dd>${escapeHtml(item.time)}</dd></div>` : ""}
-          ${item.type ? `<div><dt>Тип</dt><dd>${escapeHtml(item.type)}</dd></div>` : ""}
-          ${
-            item.channel === "events" && item.location
-              ? `<div><dt>Локация</dt><dd>${escapeHtml(item.location)}</dd></div>`
-              : ""
-          }
-          ${
-            item.channel !== "events" && item.status
-              ? `<div><dt>Статус</dt><dd>${formatStatusLabel(item.status)}</dd></div>`
-              : ""
-          }
-        </dl>
-      </div>
-      ${
-        item.description
-          ? `<p class="content-modal__description">${escapeHtml(item.description)}</p>`
-          : ""
-      }
     `;
   }
 
@@ -741,6 +729,617 @@
       </li>
     `;
   }
+
+  function openContentPostModal(item) {
+    const extras = ensureContentExtrasEntry(item.channel, item.id);
+    const view = buildPostModalView(item, extras);
+    const footer = document.createElement("div");
+    footer.className = "modal-card__footer";
+    if (canMutateActiveTab()) {
+      const editBtn = document.createElement("button");
+      editBtn.className = "primary-btn";
+      editBtn.type = "button";
+      editBtn.textContent = "Редактировать";
+      footer.appendChild(editBtn);
+    }
+    const modal = openModal({
+      title: item.title,
+      body: view.root,
+      footer: footer.childElementCount ? footer : null,
+    });
+    if (footer.childElementCount) {
+      footer.querySelector("button").addEventListener("click", () => {
+        modal.close();
+        openEditorModal("edit", item);
+      });
+    }
+
+    view.assetsAddBtn.addEventListener("click", () => {
+      if (!ensureAuthenticatedUser()) return;
+      openAssetFormModal(item, extras, view);
+    });
+    view.assetsList.addEventListener("click", (event) => {
+      const removeBtn = event.target.closest("[data-role='remove-asset']");
+      if (removeBtn) {
+        handleAssetRemove(item, extras, Number(removeBtn.dataset.assetId), view);
+      }
+    });
+
+    view.tasksAddBtn.addEventListener("click", () => {
+      if (!ensureAuthenticatedUser()) return;
+      openTaskCreationModal(item, extras, view);
+    });
+    view.tasksBody.addEventListener("click", (event) => {
+      const openBtn = event.target.closest("[data-role='open-task']");
+      if (openBtn) {
+        openTaskPreviewModal(openBtn.dataset.taskId);
+        return;
+      }
+      const unlinkBtn = event.target.closest("[data-role='unlink-task']");
+      if (unlinkBtn) {
+        handleTaskUnlink(item, extras, unlinkBtn.dataset.taskId, view);
+      }
+    });
+
+    loadContentAssets(item, extras, view);
+    loadContentTasks(item, extras, view);
+  }
+
+  function buildPostModalView(item, extras) {
+    const root = document.createElement("div");
+    root.className = "post-modal";
+    root.appendChild(renderPostInfoSection(item));
+
+    const assetsSection = document.createElement("section");
+    assetsSection.className = "post-modal__section";
+    assetsSection.innerHTML = `
+      <div class="post-modal__section-head">
+        <div>
+          <p class="post-modal__section-title">Материалы</p>
+          <p class="post-modal__section-subtitle">Прикрепите ссылки на дизайн, обложку или видео.</p>
+        </div>
+        <button class="primary-btn" type="button" data-role="add-asset">+ Добавить контент</button>
+      </div>
+      <div class="post-modal__list" data-role="assets-list"></div>
+    `;
+    const assetsList = assetsSection.querySelector("[data-role='assets-list']");
+    const assetsAddBtn = assetsSection.querySelector("[data-role='add-asset']");
+    root.appendChild(assetsSection);
+
+    const tasksSection = document.createElement("section");
+    tasksSection.className = "post-modal__section";
+    tasksSection.innerHTML = `
+      <div class="post-modal__section-head">
+        <div>
+          <p class="post-modal__section-title">Задачи</p>
+          <p class="post-modal__section-subtitle">Ведите задачи по подготовке публикации.</p>
+        </div>
+        <button class="primary-btn" type="button" data-role="add-task">+ Добавить задачку</button>
+      </div>
+      <div class="content-tasks-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Ответственный</th>
+              <th>Дедлайн</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody data-role="tasks-body"></tbody>
+        </table>
+      </div>
+    `;
+    const tasksBody = tasksSection.querySelector("[data-role='tasks-body']");
+    const tasksAddBtn = tasksSection.querySelector("[data-role='add-task']");
+    root.appendChild(tasksSection);
+
+    const view = {
+      root,
+      assetsList,
+      assetsAddBtn,
+      tasksBody,
+      tasksAddBtn,
+      updateAssets: () => renderAssetsList(assetsList, extras),
+      updateTasks: () => renderTasksTable(tasksBody, extras),
+    };
+    view.updateAssets();
+    view.updateTasks();
+    return view;
+  }
+
+  function renderPostInfoSection(item) {
+    const section = document.createElement("section");
+    section.className = "post-modal__section";
+    const typeValue = item.type ? escapeHtml(item.type) : "—";
+    const statusValue = item.status ? formatStatusLabel(item.status) : "—";
+    section.innerHTML = `
+      <p class="post-modal__section-title">Основная информация</p>
+      <dl class="post-modal__info">
+        <div>
+          <dt>Тип</dt>
+          <dd>${typeValue}</dd>
+        </div>
+        <div>
+          <dt>Дата</dt>
+          <dd>${formatFullDate(item.date)}</dd>
+        </div>
+        <div>
+          <dt>Статус</dt>
+          <dd>${statusValue}</dd>
+        </div>
+      </dl>
+      ${
+        item.description
+          ? `<p class="post-modal__description">${escapeHtml(item.description)}</p>`
+          : ""
+      }
+    `;
+    return section;
+  }
+
+  function renderAssetsList(container, extras) {
+    if (extras.assetsLoading) {
+      container.innerHTML = `<p class="post-modal__muted">Загружаем материалы…</p>`;
+      return;
+    }
+    if (extras.assetsError) {
+      container.innerHTML = `<p class="post-modal__error">${escapeHtml(extras.assetsError)}</p>`;
+      return;
+    }
+    if (!extras.assets.length) {
+      container.innerHTML = `<p class="post-modal__muted">Нет прикреплённых материалов.</p>`;
+      return;
+    }
+    container.innerHTML = extras.assets
+      .map(
+        (asset) => `
+        <article class="asset-card">
+          <div>
+            <p class="asset-card__title">${escapeHtml(asset.title)}</p>
+            ${
+              asset.url
+                ? `<a class="asset-card__link" href="${escapeAttribute(asset.url)}" target="_blank" rel="noopener noreferrer">Открыть</a>`
+                : ""
+            }
+            ${
+              asset.notes
+                ? `<p class="asset-card__notes">${escapeHtml(asset.notes)}</p>`
+                : ""
+            }
+            <p class="asset-card__meta">${formatDateTimeWithTime(asset.createdAt)}</p>
+          </div>
+          <button
+            class="ghost-icon-btn"
+            type="button"
+            data-role="remove-asset"
+            data-asset-id="${asset.id}"
+            aria-label="Удалить материал"
+          >
+            ×
+          </button>
+        </article>
+      `
+      )
+      .join("");
+  }
+
+  function renderTasksTable(tbody, extras) {
+    if (extras.tasksLoading) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="post-modal__muted">Загружаем список задач…</td>
+        </tr>
+      `;
+      return;
+    }
+    if (extras.tasksError) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="post-modal__error">${escapeHtml(extras.tasksError)}</td>
+        </tr>
+      `;
+      return;
+    }
+    if (!extras.tasks.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="post-modal__muted">Задачи ещё не добавлены.</td>
+        </tr>
+      `;
+      return;
+    }
+    tbody.innerHTML = extras.tasks
+      .map(
+        (task) => `
+        <tr>
+          <td>
+            <p class="task-cell__title">${escapeHtml(task.title)}</p>
+            <p class="task-cell__meta">
+              ${formatTaskStatusLabel(task.status)} · ${formatTaskPriorityLabel(task.priority)}
+            </p>
+          </td>
+          <td>${task.responsible ? escapeHtml(task.responsible) : "—"}</td>
+          <td>${formatTaskDeadline(task.deadline)}</td>
+          <td class="task-cell__actions">
+            <button
+              class="ghost-icon-btn"
+              type="button"
+              data-role="open-task"
+              data-task-id="${task.id}"
+              aria-label="Открыть задачу"
+            >
+              →
+            </button>
+            <button
+              class="ghost-icon-btn"
+              type="button"
+              data-role="unlink-task"
+              data-task-id="${task.id}"
+              aria-label="Удалить связь"
+            >
+              ×
+            </button>
+          </td>
+        </tr>
+      `
+      )
+      .join("");
+  }
+
+  function ensureContentExtrasEntry(channel, id) {
+    const key = `${channel}:${id}`;
+    if (!state.extras.has(key)) {
+      state.extras.set(key, {
+        assets: [],
+        tasks: [],
+        assetsLoading: false,
+        tasksLoading: false,
+        assetsError: "",
+        tasksError: "",
+      });
+    }
+    return state.extras.get(key);
+  }
+
+  function loadContentAssets(item, extras, view) {
+    extras.assetsLoading = true;
+    extras.assetsError = "";
+    view.updateAssets();
+    return requestJson(`${buildContentApiBase(item)}/assets`, { auth: false })
+      .then((assets) => {
+        extras.assets = Array.isArray(assets) ? assets : [];
+      })
+      .catch((error) => {
+        extras.assetsError = getErrorMessage(error, "Не удалось загрузить материалы.");
+      })
+      .finally(() => {
+        extras.assetsLoading = false;
+        view.updateAssets();
+      });
+  }
+
+  function loadContentTasks(item, extras, view) {
+    extras.tasksLoading = true;
+    extras.tasksError = "";
+    view.updateTasks();
+    return requestJson(`${buildContentApiBase(item)}/tasks`, { auth: false })
+      .then((tasks) => {
+        extras.tasks = Array.isArray(tasks) ? tasks : [];
+      })
+      .catch((error) => {
+        extras.tasksError = getErrorMessage(error, "Не удалось загрузить задачи.");
+      })
+      .finally(() => {
+        extras.tasksLoading = false;
+        view.updateTasks();
+      });
+  }
+
+  function openAssetFormModal(item, extras, view) {
+    const form = document.createElement("form");
+    form.className = "modal-form";
+    form.innerHTML = `
+      <div class="form-group form-group--full">
+        <label for="assetTitle">Название*</label>
+        <input id="assetTitle" name="title" required />
+      </div>
+      <div class="form-group form-group--full">
+        <label for="assetUrl">Ссылка</label>
+        <input id="assetUrl" name="url" type="url" placeholder="https://..." />
+      </div>
+      <div class="form-group form-group--full">
+        <label for="assetNotes">Комментарий</label>
+        <textarea id="assetNotes" name="notes" rows="3" placeholder="Описание файла или инструкции"></textarea>
+      </div>
+      <p class="form-error" data-role="form-error"></p>
+    `;
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "submit";
+    submitBtn.className = "primary-btn";
+    submitBtn.textContent = "Сохранить";
+    const footer = document.createElement("div");
+    footer.className = "modal-card__footer";
+    footer.appendChild(submitBtn);
+    const modal = openModal({
+      title: "Добавить материал",
+      body: form,
+      footer,
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = collectAssetPayload(form);
+      if (!payload) {
+        showFormError(form, "Заполните обязательные поля.");
+        return;
+      }
+      showFormError(form, "");
+      submitBtn.disabled = true;
+      try {
+        await requestJson(`${buildContentApiBase(item)}/assets`, {
+          method: "POST",
+          body: payload,
+        });
+        await loadContentAssets(item, extras, view);
+        modal.close();
+      } catch (error) {
+        showFormError(form, getErrorMessage(error, "Не удалось сохранить материал."));
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  function collectAssetPayload(form) {
+    const data = new FormData(form);
+    const title = String(data.get("title") || "").trim();
+    if (!title) return null;
+    const url = String(data.get("url") || "").trim();
+    const notes = String(data.get("notes") || "").trim();
+    return {
+      title,
+      url,
+      notes,
+    };
+  }
+
+  async function handleAssetRemove(item, extras, assetId, view) {
+    if (!assetId) return;
+    if (!ensureAuthenticatedUser()) return;
+    const confirmed = window.confirm("Удалить материал?");
+    if (!confirmed) return;
+    try {
+      await requestJson(`${buildContentApiBase(item)}/assets/${assetId}`, {
+        method: "DELETE",
+      });
+      extras.assets = extras.assets.filter((asset) => asset.id !== assetId);
+      view.updateAssets();
+    } catch (error) {
+      extras.assetsError = getErrorMessage(error, "Не удалось удалить материал.");
+      view.updateAssets();
+    }
+  }
+
+  function openTaskCreationModal(item, extras, view) {
+    const form = document.createElement("form");
+    form.className = "modal-form task-quick-form";
+    form.innerHTML = `
+      <div class="form-group form-group--full">
+        <label for="taskTitle">Название*</label>
+        <input id="taskTitle" name="title" required />
+      </div>
+      <div class="form-group">
+        <label for="taskResponsible">Ответственный*</label>
+        <input id="taskResponsible" name="responsible" required />
+      </div>
+      <div class="form-group">
+        <label for="taskDeadline">Дедлайн*</label>
+        <input id="taskDeadline" name="deadline" type="datetime-local" required />
+      </div>
+      <div class="form-group">
+        <label for="taskPriority">Приоритет</label>
+        <select id="taskPriority" name="priority">
+          ${TASK_PRIORITY_OPTIONS.map(
+            (option) => `<option value="${option.value}">${option.label}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="taskStatus">Статус</label>
+        <select id="taskStatus" name="status">
+          ${TASK_STATUS_OPTIONS.map(
+            (option) => `<option value="${option.value}">${option.label}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="form-group form-group--full">
+        <label for="taskDescription">Описание</label>
+        <textarea id="taskDescription" name="description" rows="3"></textarea>
+      </div>
+      <p class="form-error" data-role="form-error"></p>
+    `;
+    const footer = document.createElement("div");
+    footer.className = "modal-card__footer";
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "submit";
+    submitBtn.className = "primary-btn";
+    submitBtn.textContent = "Сохранить";
+    footer.appendChild(submitBtn);
+    const modal = openModal({
+      title: "Новая задачка",
+      body: form,
+      footer,
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = collectTaskFormValues(form);
+      if (!payload) {
+        showFormError(form, "Проверьте обязательные поля и дедлайн.");
+        return;
+      }
+      showFormError(form, "");
+      submitBtn.disabled = true;
+      try {
+        const createdTask = await requestJson("/tasks", {
+          method: "POST",
+          body: payload,
+          auth: false,
+        });
+        await requestJson(`${buildContentApiBase(item)}/tasks`, {
+          method: "POST",
+          body: { taskId: createdTask.id },
+        });
+        modal.close();
+        await loadContentTasks(item, extras, view);
+      } catch (error) {
+        showFormError(form, getErrorMessage(error, "Не удалось сохранить задачку."));
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  function collectTaskFormValues(form) {
+    const data = new FormData(form);
+    const title = String(data.get("title") || "").trim();
+    const responsible = String(data.get("responsible") || "").trim();
+    const deadlineRaw = data.get("deadline");
+    if (!title || !responsible || !deadlineRaw) {
+      return null;
+    }
+    const deadline = new Date(deadlineRaw);
+    if (Number.isNaN(deadline.getTime())) {
+      return null;
+    }
+    return {
+      title,
+      responsible,
+      deadline: deadline.toISOString(),
+      priority: data.get("priority") || "medium",
+      status: data.get("status") || "pending",
+      description: String(data.get("description") || "").trim(),
+      attachments: [],
+      subtasks: [],
+    };
+  }
+
+  async function handleTaskUnlink(item, extras, taskId, view) {
+    if (!taskId) return;
+    if (!ensureAuthenticatedUser()) return;
+    const confirmed = window.confirm("Убрать задачу из публикации?");
+    if (!confirmed) return;
+    try {
+      await requestJson(`${buildContentApiBase(item)}/tasks/${encodeURIComponent(taskId)}`, {
+        method: "DELETE",
+      });
+      extras.tasks = extras.tasks.filter((task) => task.id !== taskId);
+      view.updateTasks();
+    } catch (error) {
+      extras.tasksError = getErrorMessage(error, "Не удалось удалить задачу из списка.");
+      view.updateTasks();
+    }
+  }
+
+  function openTaskPreviewModal(taskId) {
+    const container = document.createElement("div");
+    container.className = "task-preview";
+    container.innerHTML = `<p class="post-modal__muted">Загрузка задачи...</p>`;
+    const modal = openModal({
+      title: "Задача",
+      body: container,
+    });
+    requestJson(`/tasks/${encodeURIComponent(taskId)}`, { auth: false })
+      .then((task) => {
+        if (!task) {
+          container.innerHTML = `<p class="post-modal__error">Задача не найдена.</p>`;
+          return;
+        }
+        container.innerHTML = renderTaskPreview(task, taskId);
+      })
+      .catch((error) => {
+        container.innerHTML = `<p class="post-modal__error">${escapeHtml(
+          getErrorMessage(error, "Не удалось загрузить задачу.")
+        )}</p>`;
+      });
+  }
+
+  function renderTaskPreview(task, taskId) {
+    return `
+      <div class="task-preview__head">
+        <div>
+          <p class="task-preview__title">${escapeHtml(task.title)}</p>
+          <p class="task-preview__meta">
+            ${formatTaskStatusLabel(task.status)} · ${formatTaskPriorityLabel(task.priority)}
+          </p>
+        </div>
+        <a class="ghost-btn" href="index.html#task=${encodeURIComponent(taskId)}" target="_blank">Открыть доску</a>
+      </div>
+      <dl class="task-preview__info">
+        <div>
+          <dt>Ответственный</dt>
+          <dd>${task.responsible ? escapeHtml(task.responsible) : "—"}</dd>
+        </div>
+        <div>
+          <dt>Дедлайн</dt>
+          <dd>${formatTaskDeadline(task.deadline)}</dd>
+        </div>
+      </dl>
+      ${
+        task.description
+          ? `<p class="task-preview__description">${escapeHtml(task.description)}</p>`
+          : ""
+      }
+    `;
+  }
+
+  function buildContentApiBase(item) {
+    return `/content-plan/${encodeURIComponent(item.channel)}/${encodeURIComponent(item.id)}`;
+  }
+
+  function ensureAuthenticatedUser() {
+    if (state.token) return true;
+    alert("Чтобы выполнить действие, войдите в систему.");
+    return false;
+  }
+
+  function formatTaskStatusLabel(value) {
+    const option = TASK_STATUS_OPTIONS.find((item) => item.value === value);
+    return option ? option.label : value || "—";
+  }
+
+  function formatTaskPriorityLabel(value) {
+    const option = TASK_PRIORITY_OPTIONS.find((item) => item.value === value);
+    return option ? option.label : value || "—";
+  }
+
+  function formatTaskDeadline(value) {
+    if (!value) return "—";
+    try {
+      return new Intl.DateTimeFormat("ru-RU", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(value));
+    } catch {
+      return value;
+    }
+  }
+
+  function formatDateTimeWithTime(value) {
+    if (!value) return "";
+    try {
+      return new Intl.DateTimeFormat("ru-RU", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(value));
+    } catch {
+      return value;
+    }
+  }
+
 
   function openEditorModal(mode, item) {
     const isEdit = mode === "edit";
