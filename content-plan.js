@@ -829,7 +829,7 @@
         </div>
       `
           : `
-        <div class="form-group form-group--full">
+        <div class="form-group">
           <label for="entryType">Тип</label>
           <select id="entryType" name="type">
             <option value="" ${normalizedDefaultType ? "" : "selected"}>Не выбрано</option>
