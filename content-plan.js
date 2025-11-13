@@ -33,6 +33,12 @@
   ];
 
   const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const CONTENT_TYPE_OPTIONS = [
+    { value: "Пост", label: "Пост" },
+    { value: "Карусель", label: "Карусель" },
+    { value: "Сторис", label: "Сторис" },
+    { value: "Рилс", label: "Рилс" },
+  ];
   const TODAY_ISO = formatISODate(new Date());
 
   const now = new Date();
@@ -749,6 +755,7 @@
     const defaultTitle = isEdit ? item.title : "";
     const defaultDescription = isEdit ? item.description : "";
     const defaultType = isEdit ? item.type : "";
+    const normalizedDefaultType = (defaultType || "").toLowerCase();
     const defaultStatus = isEdit ? item.status : CONTENT_STATUSES[0].value;
     const defaultLocation = isEdit ? item.location : "";
     const defaultEventId = isEdit ? item.eventId : "";
@@ -761,16 +768,22 @@
         <label for="entryDate">Дата</label>
         <input id="entryDate" name="date" type="date" required value="${escapeAttribute(defaultDate)}" />
       </div>
-      <div class="form-group">
-        <label for="entryTime">Время</label>
-        <input
-          id="entryTime"
-          name="time"
-          type="time"
-          step="${state.tab === "events" ? "60" : "1800"}"
-          value="${escapeAttribute(defaultTime)}"
-        />
-      </div>
+      ${
+        state.tab === "events"
+          ? `
+        <div class="form-group">
+          <label for="entryTime">Время</label>
+          <input
+            id="entryTime"
+            name="time"
+            type="time"
+            step="60"
+            value="${escapeAttribute(defaultTime)}"
+          />
+        </div>
+      `
+          : ""
+      }
       ${
         state.tab === "events"
           ? `
@@ -807,10 +820,31 @@
         </div>
       `
       }
-      <div class="form-group form-group--full">
-        <label for="entryType">Тип</label>
-        <input id="entryType" name="type" value="${escapeAttribute(defaultType)}" />
-      </div>
+      ${
+        state.tab === "events"
+          ? `
+        <div class="form-group form-group--full">
+          <label for="entryType">Тип</label>
+          <input id="entryType" name="type" value="${escapeAttribute(defaultType)}" />
+        </div>
+      `
+          : `
+        <div class="form-group form-group--full">
+          <label for="entryType">Тип</label>
+          <select id="entryType" name="type">
+            <option value="" ${normalizedDefaultType ? "" : "selected"}>Не выбрано</option>
+            ${CONTENT_TYPE_OPTIONS.map(
+              (option) => `
+              <option value="${option.value}" ${
+                option.value.toLowerCase() === normalizedDefaultType ? "selected" : ""
+              }>
+                ${option.label}
+              </option>`
+            ).join("")}
+          </select>
+        </div>
+      `
+      }
       <div class="form-group form-group--full">
         <label for="entryDescription">Описание</label>
         <textarea id="entryDescription" name="description" rows="4">${escapeAttribute(defaultDescription)}</textarea>
