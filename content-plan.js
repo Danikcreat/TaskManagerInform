@@ -1122,62 +1122,85 @@
 
   function openTaskCreationModal(item, extras, view) {
     const form = document.createElement("form");
-    form.className = "modal-form task-quick-form";
+    form.id = "taskForm";
     form.innerHTML = `
-      <div class="form-group form-group--full">
-        <label for="taskTitle">Название*</label>
-        <input id="taskTitle" name="title" required />
+      <div class="modal__header">
+        <div>
+          <p class="workspace__eyebrow">Новая запись</p>
+          <h2 class="modal__title">Создание задачи</h2>
+        </div>
+        <button class="modal__close" type="button" data-close-modal aria-label="Закрыть">×</button>
       </div>
-      <div class="form-group">
-        <label for="taskResponsible">Ответственный*</label>
-        <input id="taskResponsible" name="responsible" required />
+
+      <div class="form-grid">
+        <div class="form-group form-group--full">
+          <label for="taskTitleField">Название*</label>
+          <input id="taskTitleField" name="title" required />
+        </div>
+        <div class="form-group">
+          <label for="taskResponsibleField">Ответственный*</label>
+          <input id="taskResponsibleField" name="responsible" required />
+        </div>
+        <div class="form-group">
+          <label for="taskDeadlineField">Дедлайн*</label>
+          <input id="taskDeadlineField" name="deadline" type="datetime-local" required />
+        </div>
+        <div class="form-group">
+          <label for="taskPriorityField">Приоритет</label>
+          <select id="taskPriorityField" name="priority">
+            ${TASK_PRIORITY_OPTIONS.map(
+              (option) => `<option value="${option.value}">${option.label}</option>`
+            ).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="taskStatusField">Статус</label>
+          <select id="taskStatusField" name="status">
+            ${TASK_STATUS_OPTIONS.map(
+              (option) => `<option value="${option.value}">${option.label}</option>`
+            ).join("")}
+          </select>
+        </div>
       </div>
-      <div class="form-group">
-        <label for="taskDeadline">Дедлайн*</label>
-        <input id="taskDeadline" name="deadline" type="datetime-local" required />
+
+      <div class="form-group form-block">
+        <label for="taskDescriptionField">Описание</label>
+        <textarea id="taskDescriptionField" name="description" rows="4"></textarea>
       </div>
-      <div class="form-group">
-        <label for="taskPriority">Приоритет</label>
-        <select id="taskPriority" name="priority">
-          ${TASK_PRIORITY_OPTIONS.map(
-            (option) => `<option value="${option.value}">${option.label}</option>`
-          ).join("")}
-        </select>
+
+      <div class="form-group form-block">
+        <label>Подзадачи</label>
+        <div class="subtasks-list" data-role="subtasks-list"></div>
+        <button class="ghost-btn" type="button" data-role="add-subtask">+ Подзадача</button>
       </div>
-      <div class="form-group">
-        <label for="taskStatus">Статус</label>
-        <select id="taskStatus" name="status">
-          ${TASK_STATUS_OPTIONS.map(
-            (option) => `<option value="${option.value}">${option.label}</option>`
-          ).join("")}
-        </select>
+
+      <div class="form-group form-block">
+        <label>Вложения</label>
+        <div class="attachment-list" data-role="attachments-list"></div>
+        <button class="ghost-btn" type="button" data-role="add-attachment">+ Материал</button>
       </div>
-      <div class="form-group form-group--full">
-        <label for="taskDescription">Описание</label>
-        <textarea id="taskDescription" name="description" rows="3"></textarea>
-      </div>
+
       <p class="form-error" data-role="form-error"></p>
+      <div class="modal__footer">
+        <button type="button" class="ghost-btn" data-close-modal>Отмена</button>
+        <button type="submit" class="primary-btn">Создать</button>
+      </div>
     `;
-    const footer = document.createElement("div");
-    footer.className = "modal-card__footer";
-    const submitBtn = document.createElement("button");
-    submitBtn.type = "submit";
-    submitBtn.className = "primary-btn";
-    submitBtn.textContent = "Сохранить";
-    footer.appendChild(submitBtn);
     const modal = openModal({
       title: "Новая задачка",
       body: form,
-      footer,
     });
+    setupTaskFormDynamicLists(form);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (!form.reportValidity()) return;
       const payload = collectTaskFormValues(form);
       if (!payload) {
-        showFormError(form, "Проверьте обязательные поля и дедлайн.");
+        showFormError(form, "Проверьте обязательные поля и формат дедлайна.");
         return;
       }
       showFormError(form, "");
+      const submitBtn = form.querySelector("button[type='submit']");
       submitBtn.disabled = true;
       try {
         const createdTask = await requestJson("/tasks", {
@@ -1199,6 +1222,75 @@
     });
   }
 
+  function setupTaskFormDynamicLists(form) {
+    const subtasksList = form.querySelector("[data-role='subtasks-list']");
+    const attachmentsList = form.querySelector("[data-role='attachments-list']");
+    form.addEventListener("click", (event) => {
+      const addSubtaskBtn = event.target.closest("[data-role='add-subtask']");
+      if (addSubtaskBtn) {
+        event.preventDefault();
+        addSubtaskRow(subtasksList);
+        return;
+      }
+      const removeSubtaskBtn = event.target.closest("[data-role='remove-subtask']");
+      if (removeSubtaskBtn) {
+        event.preventDefault();
+        removeSubtaskBtn.closest(".subtask-item")?.remove();
+        return;
+      }
+      const addAttachmentBtn = event.target.closest("[data-role='add-attachment']");
+      if (addAttachmentBtn) {
+        event.preventDefault();
+        addAttachmentRow(attachmentsList);
+        return;
+      }
+      const removeAttachmentBtn = event.target.closest("[data-role='remove-attachment']");
+      if (removeAttachmentBtn) {
+        event.preventDefault();
+        removeAttachmentBtn.closest(".subtask-item")?.remove();
+      }
+    });
+  }
+
+  function addSubtaskRow(list, value = {}) {
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "subtask-item";
+    row.innerHTML = `
+      <input type="checkbox" ${value.done ? "checked" : ""} />
+      <input
+        type="text"
+        name="subtask-text"
+        placeholder="Опишите подзадачу"
+        value="${escapeAttribute(value.text || "")}"
+      />
+      <button type="button" class="ghost-btn" data-role="remove-subtask">×</button>
+    `;
+    list.appendChild(row);
+  }
+
+  function addAttachmentRow(list, value = {}) {
+    if (!list) return;
+    const row = document.createElement("div");
+    row.className = "subtask-item";
+    row.innerHTML = `
+      <input
+        type="text"
+        name="attachment-label"
+        placeholder="Название"
+        value="${escapeAttribute(value.label || "")}"
+      />
+      <input
+        type="url"
+        name="attachment-url"
+        placeholder="https://..."
+        value="${escapeAttribute(value.url || "")}"
+      />
+      <button type="button" class="ghost-btn" data-role="remove-attachment">×</button>
+    `;
+    list.appendChild(row);
+  }
+
   function collectTaskFormValues(form) {
     const data = new FormData(form);
     const title = String(data.get("title") || "").trim();
@@ -1211,6 +1303,10 @@
     if (Number.isNaN(deadline.getTime())) {
       return null;
     }
+    const subtasks = collectSubtasksFromForm(form.querySelector("[data-role='subtasks-list']"));
+    const attachments = collectAttachmentsFromForm(
+      form.querySelector("[data-role='attachments-list']")
+    );
     return {
       title,
       responsible,
@@ -1218,9 +1314,35 @@
       priority: data.get("priority") || "medium",
       status: data.get("status") || "pending",
       description: String(data.get("description") || "").trim(),
-      attachments: [],
-      subtasks: [],
+      attachments,
+      subtasks,
     };
+  }
+
+  function collectSubtasksFromForm(list) {
+    if (!list) return [];
+    return Array.from(list.querySelectorAll(".subtask-item"))
+      .map((row) => {
+        const textInput = row.querySelector("input[name='subtask-text']");
+        if (!textInput) return null;
+        const text = textInput.value.trim();
+        if (!text) return null;
+        const done = row.querySelector("input[type='checkbox']")?.checked || false;
+        return { text, done };
+      })
+      .filter(Boolean);
+  }
+
+  function collectAttachmentsFromForm(list) {
+    if (!list) return [];
+    return Array.from(list.querySelectorAll(".subtask-item"))
+      .map((row) => {
+        const label = row.querySelector("input[name='attachment-label']")?.value.trim() || "";
+        const url = row.querySelector("input[name='attachment-url']")?.value.trim() || "";
+        if (!url) return null;
+        return { label, url };
+      })
+      .filter(Boolean);
   }
 
   async function handleTaskUnlink(item, extras, taskId, view) {
@@ -1725,7 +1847,11 @@
     };
     document.addEventListener("keydown", handleEsc);
     overlay.addEventListener("click", (event) => {
-      if (event.target === overlay || event.target.closest(".modal__close")) {
+      if (
+        event.target === overlay ||
+        event.target.closest(".modal__close") ||
+        event.target.closest("[data-close-modal]")
+      ) {
         close();
       }
     });
