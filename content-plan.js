@@ -772,7 +772,7 @@
     view.tasksBody.addEventListener("click", (event) => {
       const openBtn = event.target.closest("[data-role='open-task']");
       if (openBtn) {
-        openTaskPreviewModal(openBtn.dataset.taskId);
+        openTaskBoardTab(openBtn.dataset.taskId);
         return;
       }
       const unlinkBtn = event.target.closest("[data-role='unlink-task']");
@@ -1362,56 +1362,10 @@
     }
   }
 
-  function openTaskPreviewModal(taskId) {
-    const container = document.createElement("div");
-    container.className = "task-preview";
-    container.innerHTML = `<p class="post-modal__muted">Загрузка задачи...</p>`;
-    const modal = openModal({
-      title: "Задача",
-      body: container,
-    });
-    requestJson(`/tasks/${encodeURIComponent(taskId)}`, { auth: false })
-      .then((task) => {
-        if (!task) {
-          container.innerHTML = `<p class="post-modal__error">Задача не найдена.</p>`;
-          return;
-        }
-        container.innerHTML = renderTaskPreview(task, taskId);
-      })
-      .catch((error) => {
-        container.innerHTML = `<p class="post-modal__error">${escapeHtml(
-          getErrorMessage(error, "Не удалось загрузить задачу.")
-        )}</p>`;
-      });
-  }
-
-  function renderTaskPreview(task, taskId) {
-    return `
-      <div class="task-preview__head">
-        <div>
-          <p class="task-preview__title">${escapeHtml(task.title)}</p>
-          <p class="task-preview__meta">
-            ${formatTaskStatusLabel(task.status)} · ${formatTaskPriorityLabel(task.priority)}
-          </p>
-        </div>
-        <a class="ghost-btn" href="index.html#task=${encodeURIComponent(taskId)}" target="_blank">Открыть доску</a>
-      </div>
-      <dl class="task-preview__info">
-        <div>
-          <dt>Ответственный</dt>
-          <dd>${task.responsible ? escapeHtml(task.responsible) : "—"}</dd>
-        </div>
-        <div>
-          <dt>Дедлайн</dt>
-          <dd>${formatTaskDeadline(task.deadline)}</dd>
-        </div>
-      </dl>
-      ${
-        task.description
-          ? `<p class="task-preview__description">${escapeHtml(task.description)}</p>`
-          : ""
-      }
-    `;
+  function openTaskBoardTab(taskId) {
+    if (!taskId) return;
+    const url = `index.html#task=${encodeURIComponent(taskId)}`;
+    window.open(url, "_blank", "noreferrer");
   }
 
   function buildContentApiBase(item) {
