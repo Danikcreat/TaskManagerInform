@@ -1276,8 +1276,8 @@ body {
   transition: transform 0.2s ease;
   min-width: 0;
   white-space: normal;
-  line-height: 1.2;
-  max-height: calc(1.2em * 2);
+  line-height: 1;
+  max-height: calc(1.4em * 2);
   overflow: hidden;
 }
 
