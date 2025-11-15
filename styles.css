@@ -1273,6 +1273,10 @@ body {
   color: var(--text);
   cursor: pointer;
   transition: transform 0.2s ease;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .calendar-chip:hover {
