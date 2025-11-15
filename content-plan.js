@@ -1039,6 +1039,8 @@
   function openAssetFormModal(item, extras, view) {
     const form = document.createElement("form");
     form.className = "modal-form";
+    const formId = `asset-form-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    form.id = formId;
     form.innerHTML = `
       <div class="form-group form-group--full">
         <label for="assetTitle">Название*</label>
@@ -1060,6 +1062,7 @@
     submitBtn.textContent = "Сохранить";
     const footer = document.createElement("div");
     footer.className = "modal-card__footer";
+    submitBtn.setAttribute("form", formId);
     footer.appendChild(submitBtn);
     const modal = openModal({
       title: "Добавить материал",
@@ -1689,17 +1692,12 @@
     if (!refs.userChip) return;
     const user = state.user;
     if (!user) {
-      refs.userChip.innerHTML = `
-        <span class="user-chip__name">Гость</span>
-        <span class="user-chip__role">только просмотр</span>
-      `;
+      refs.userChip.textContent = "только просмотр";
       return;
     }
-    const name = user.displayName || user.firstName || user.login || "Пользователь";
-    refs.userChip.innerHTML = `
-      <span class="user-chip__name">${escapeHtml(name)}</span>
-      <span class="user-chip__role">${renderRoleLabel(user.role)}</span>
-    `;
+    const roleLabel = renderRoleLabel(user.role);
+    const identity = user.login || user.displayName || user.firstName || "Пользователь";
+    refs.userChip.textContent = `${roleLabel} • ${identity}`;
   }
 
   function renderRoleLabel(role) {
