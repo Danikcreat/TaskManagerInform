@@ -1115,7 +1115,7 @@
       await requestJson(`${buildContentApiBase(item)}/assets/${assetId}`, {
         method: "DELETE",
       });
-      extras.assets = extras.assets.filter((asset) => asset.id !== assetId);
+      extras.assets = extras.assets.filter((asset) => String(asset.id) !== String(assetId));
       view.updateAssets();
     } catch (error) {
       extras.assetsError = getErrorMessage(error, "Не удалось удалить материал.");
