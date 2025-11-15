@@ -1700,15 +1700,22 @@ async function ensureUsersTable() {
       AND birth_date !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
   `);
 
-  await pool.query(
-    `
-    ALTER TABLE users
-    ADD CONSTRAINT users_birth_date_check
-    CHECK (
-      birth_date IS NULL OR birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-    )
-  `
-  );
+  await pool.query(`
+    DO $$
+    BEGIN
+      BEGIN
+        ALTER TABLE users
+        ADD CONSTRAINT users_birth_date_check
+        CHECK (
+          birth_date IS NULL OR birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        );
+      EXCEPTION
+        WHEN duplicate_object THEN
+          NULL;
+      END;
+    END
+    $$;
+  `);
 }
 
 async function ensureContentPlanTables() {

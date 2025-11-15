@@ -798,7 +798,7 @@
           <p class="post-modal__section-title">Материалы</p>
           <p class="post-modal__section-subtitle">Прикрепите ссылки на дизайн, обложку или видео.</p>
         </div>
-        <button class="primary-btn" type="button" data-role="add-asset">+ Добавить контент</button>
+        <button class="ghost-btn" type="button" data-role="add-asset">+ Добавить контент</button>
       </div>
       <div class="post-modal__list" data-role="assets-list"></div>
     `;
@@ -814,7 +814,7 @@
           <p class="post-modal__section-title">Задачи</p>
           <p class="post-modal__section-subtitle">Ведите задачи по подготовке публикации.</p>
         </div>
-        <button class="primary-btn" type="button" data-role="add-task">+ Добавить задачку</button>
+        <button class="ghost-btn" type="button" data-role="add-task">+ Добавить задачку</button>
       </div>
       <div class="content-tasks-table">
         <table>
