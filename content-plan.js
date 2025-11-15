@@ -1189,6 +1189,7 @@
     const modal = openModal({
       title: "Новая задачка",
       body: form,
+      hideHeader: true,
     });
     setupTaskFormDynamicLists(form);
     form.addEventListener("submit", async (event) => {
@@ -1767,16 +1768,20 @@
     return modalRoot;
   }
 
-  function openModal({ title, body, footer }) {
+  function openModal({ title, body, footer, hideHeader = false }) {
     const root = ensureModalRoot();
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.innerHTML = `
       <div class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeAttribute(title)}">
-        <div class="modal-card__header">
+        ${
+          hideHeader
+            ? ""
+            : `<div class="modal-card__header">
           <h2>${escapeHtml(title)}</h2>
           <button class="modal__close" type="button" aria-label="Закрыть">×</button>
-        </div>
+        </div>`
+        }
         <div class="modal-card__body"></div>
       </div>
     `;
