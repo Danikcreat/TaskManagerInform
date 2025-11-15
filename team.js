@@ -511,6 +511,11 @@
       submitBtn.disabled = true;
       try {
         const formData = new FormData(form);
+        const login = formData.get("login")?.trim();
+        if (!isEdit && login && isLoginTaken(login)) {
+          errorNode.textContent = "Пользователь с таким логином уже существует.";
+          return;
+        }
         const payload = collectUserPayload(formData, { includePassword: !isEdit });
         if (isEdit) {
           await requestJson(`/users/${encodeURIComponent(user.id)}`, {
@@ -677,6 +682,12 @@
       return targetRole === "content_manager" || targetRole === "executor";
     }
     return false;
+  }
+
+  function isLoginTaken(value) {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    return usersState.some((user) => (user.login || "").toLowerCase() === normalized);
   }
 
   function canViewUserPassword(user) {
