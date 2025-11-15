@@ -235,7 +235,7 @@
   }
 
   function renderFullTable() {
-    const rowsHtml = usersState
+    const rowsHtml = sortTeamUsers(usersState)
       .map((user) => {
         const canManage = canManageRole(user.role);
         const canSeePassword = canViewUserPassword(user);
@@ -309,7 +309,7 @@
   }
 
   function renderCompactTable() {
-    const rowsHtml = usersState
+    const rowsHtml = sortTeamUsers(usersState)
       .map(
         (user) => `
         <tr>
@@ -334,6 +334,39 @@
         </table>
       </div>
     `;
+  }
+
+  function sortTeamUsers(users) {
+    if (!users || !users.length) return [];
+    const priorities = ["координатор", "зам по производству", "зам по контенту"];
+    const buckets = priorities.map(() => []);
+    const rest = [];
+    for (const user of users) {
+      const normalized = (user.position || "").toLowerCase();
+      let placed = false;
+      for (let index = 0; index < priorities.length; index += 1) {
+        if (normalized.includes(priorities[index])) {
+          buckets[index].push(user);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        rest.push(user);
+      }
+    }
+    rest.sort((a, b) => {
+      const aName = (a.lastName || "").toLowerCase();
+      const bName = (b.lastName || "").toLowerCase();
+      if (aName < bName) return -1;
+      if (aName > bName) return 1;
+      const aFirst = (a.firstName || "").toLowerCase();
+      const bFirst = (b.firstName || "").toLowerCase();
+      if (aFirst < bFirst) return -1;
+      if (aFirst > bFirst) return 1;
+      return 0;
+    });
+    return buckets.flat().concat(rest);
   }
 
   function renderActionMenu(userId, items) {

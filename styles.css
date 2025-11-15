@@ -1264,6 +1264,7 @@ body {
 
 .calendar-chip {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
@@ -1274,9 +1275,10 @@ body {
   cursor: pointer;
   transition: transform 0.2s ease;
   min-width: 0;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.2;
+  max-height: calc(1.2em * 2);
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .calendar-chip:hover {
