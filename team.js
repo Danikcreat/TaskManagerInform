@@ -211,7 +211,8 @@
       `;
       return;
     }
-    if (!usersState.length) {
+    const visibleUsers = getVisibleUsers();
+    if (!visibleUsers.length) {
       tableRoot.innerHTML = `
         <div class="empty-state">
           <h3>В базе пока нет пользователей</h3>
@@ -235,7 +236,8 @@
   }
 
   function renderFullTable() {
-    const rowsHtml = sortTeamUsers(usersState)
+    const visibleUsers = getVisibleUsers();
+    const rowsHtml = sortTeamUsers(visibleUsers)
       .map((user) => {
         const canManage = canManageRole(user.role);
         const canSeePassword = canViewUserPassword(user);
@@ -309,7 +311,8 @@
   }
 
   function renderCompactTable() {
-    const rowsHtml = sortTeamUsers(usersState)
+    const visibleUsers = getVisibleUsers();
+    const rowsHtml = sortTeamUsers(visibleUsers)
       .map(
         (user) => `
         <tr>
@@ -681,6 +684,20 @@
     if (currentUser.role === "admin") {
       return targetRole === "content_manager" || targetRole === "executor";
     }
+    return false;
+  }
+
+  function getVisibleUsers() {
+    if (isPrivilegedView()) return usersState;
+    return usersState.filter((user) => !shouldHideForLimitedView(user));
+  }
+
+  function shouldHideForLimitedView(user) {
+    const hiddenLogins = new Set(["test"]);
+    const hiddenRoles = new Set(["guest", "visitor"]);
+    const login = (user?.login || "").toLowerCase();
+    if (hiddenLogins.has(login)) return true;
+    if (hiddenRoles.has((user?.role || "").toLowerCase())) return true;
     return false;
   }
 
